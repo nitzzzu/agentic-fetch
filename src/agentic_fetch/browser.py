@@ -52,12 +52,14 @@ class BrowserPool:
         config = zd.Config(
             headless=settings.headless,
             user_data_dir=user_data_dir,
-            browser_args=[
-                f"--user-agent={settings.fake_user_agent}",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-background-networking",
-            ],
+            #user_agent=settings.fake_user_agent,
+            browser_connection_timeout=0.5,
+            browser_connection_max_tries=60,
+            # browser_args=[
+            #     "--no-sandbox",
+            #     "--disable-dev-shm-usage",
+            #     "--disable-background-networking",
+            # ],
         )
         self._browser = await zd.start(config)
         self._semaphore = asyncio.Semaphore(settings.max_browser_tabs)
