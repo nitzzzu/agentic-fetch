@@ -1,6 +1,7 @@
 import httpx
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
+from bs4 import BeautifulSoup
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
@@ -12,7 +13,14 @@ class GitHubPlugin(FetchPlugin):
     domains = ["github.com", "www.github.com", "raw.githubusercontent.com"]
 
     HEADERS = {"Accept": "application/vnd.github.v3+json", "User-Agent": "agentic-fetch/1.0"}
+    TRENDING_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
+    RE_TRENDING = re.compile(r'^/trending(/[^/?]+)?$')
     RE_REPO = re.compile(r'^/([^/]+)/([^/]+)/?$')
     RE_FILE = re.compile(r'^/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$')
     RE_ISSUE = re.compile(r'^/([^/]+)/([^/]+)/issues/(\d+)$')
@@ -20,8 +28,12 @@ class GitHubPlugin(FetchPlugin):
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse | None:
         parsed = urlparse(url)
-        path = parsed.path.rstrip("/")
+        path = parsed.path.rstrip("/") or "/"
 
+        if m := self.RE_TRENDING.match(path):
+            lang = (m.group(1) or "").lstrip("/")
+            since = parse_qs(parsed.query).get("since", ["daily"])[0]
+            return await self._fetch_trending(lang, since, req, url)
         if m := self.RE_FILE.match(path):
             return await self._fetch_file(*m.groups(), req, url)
         if m := self.RE_ISSUE.match(path):
@@ -32,6 +44,77 @@ class GitHubPlugin(FetchPlugin):
             return await self._fetch_repo(*m.groups(), req, url)
 
         return None
+
+    async def _fetch_trending(self, language: str, since: str, req: FetchRequest, url: str) -> FetchResponse:
+        trend_url = f"https://github.com/trending/{language}" if language else "https://github.com/trending"
+        async with httpx.AsyncClient(headers=self.TRENDING_HEADERS, timeout=15, follow_redirects=True) as c:
+            r = await c.get(trend_url, params={"since": since})
+            r.raise_for_status()
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        repos = []
+        for article in soup.select("article.Box-row"):
+            # repo path: /owner/repo
+            h2_a = article.select_one("h2 a, h1 a")
+            if not h2_a:
+                continue
+            repo_path = h2_a.get("href", "").strip()
+            parts = repo_path.strip("/").split("/")
+            if len(parts) != 2:
+                continue
+            owner, repo = parts
+
+            desc_el = article.select_one("p")
+            description = desc_el.get_text(strip=True) if desc_el else ""
+
+            lang_el = article.select_one("[itemprop='programmingLanguage']")
+            language_name = lang_el.get_text(strip=True) if lang_el else ""
+
+            # total stars: link to /stargazers
+            stars_el = article.select_one("a[href$='/stargazers']")
+            stars = stars_el.get_text(strip=True).replace(",", "") if stars_el else "0"
+
+            # forks: link to /forks or /network/members
+            forks_el = article.select_one("a[href$='/forks'], a[href$='/network/members']")
+            forks = forks_el.get_text(strip=True).replace(",", "") if forks_el else "0"
+
+            # stars today: last span containing "stars today"
+            today_stars = ""
+            for span in article.select("span"):
+                t = span.get_text(strip=True)
+                if "stars today" in t or "star today" in t:
+                    today_stars = t.replace("stars today", "").replace("star today", "").strip()
+                    break
+
+            repos.append({
+                "owner": owner, "repo": repo,
+                "description": description,
+                "language": language_name,
+                "stars": stars,
+                "forks": forks,
+                "today": today_stars,
+            })
+
+        period = {"daily": "today", "weekly": "this week", "monthly": "this month"}.get(since, since)
+        lang_label = f" · {language}" if language else ""
+        title = f"GitHub Trending{lang_label} — {period}"
+
+        if not repos:
+            md = f"# {title}\n\nNo trending repositories found.\n"
+        else:
+            md = f"# {title}\n\n"
+            md += f"| # | Repository | Description | Lang | Stars | Forks | {period.capitalize()} |\n"
+            md += f"|---|------------|-------------|------|------:|------:|-------|\n"
+            for i, r in enumerate(repos, 1):
+                repo_url = f"https://github.com/{r['owner']}/{r['repo']}"
+                desc = r["description"].replace("|", "\\|")[:80] + ("…" if len(r["description"]) > 80 else "")
+                md += (f"| {i} | [{r['owner']}/{r['repo']}]({repo_url}) "
+                       f"| {desc} | {r['language']} | {r['stars']} | {r['forks']} | ⭐ {r['today']} |\n")
+
+        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
+        return FetchResponse(url=url, title=title, markdown=md,
+                             plugin_used=self.name, method_used="plugin",
+                             truncated=truncated, next_offset=next_offset if truncated else None)
 
     async def _fetch_repo(self, owner, repo, req, url) -> FetchResponse:
         async with httpx.AsyncClient(headers=self.HEADERS, timeout=15) as c:

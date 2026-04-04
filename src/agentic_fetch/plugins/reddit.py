@@ -14,8 +14,10 @@ class RedditPlugin(FetchPlugin):
     name = "reddit"
 
     HEADERS = {
-        "User-Agent": "agentic-fetch/1.0 (read-only)",
-        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/html, */*",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse:
