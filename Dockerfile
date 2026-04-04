@@ -23,6 +23,7 @@ COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev
 
 COPY . .
+RUN sed -i 's/\r//' start.sh && chmod +x start.sh
 
 ENV DISPLAY=:99 \
     PYTHONUNBUFFERED=1 \
