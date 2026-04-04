@@ -1,0 +1,19 @@
+services:
+  agentic-fetch:
+    build: .
+    ports:
+      - "8000:8000"
+      - "6080:6080"
+    volumes:
+      - agentic-data:/data
+    environment:
+      - AF_HEADLESS=false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  agentic-data:

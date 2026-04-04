@@ -1,0 +1,7 @@
+/plans
+/docs
+.claude
+.env
+/profile
+/cache
+__pycache__

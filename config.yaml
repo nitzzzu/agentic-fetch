@@ -1,0 +1,65 @@
+# Global DOM strip (applied before html→markdown conversion)
+strip_selectors:
+  - nav
+  - footer
+  - aside
+  - header
+  - .cookie-banner
+  - "#cookie-consent"
+  - .ad
+  - .advertisement
+  - "[class*='popup']"
+  - "[id*='modal']"
+
+# Global line strip (regex, applied to markdown output after conversion)
+strip_lines:
+  - "^\\s*Share (this|on)"
+  - "^\\s*Subscribe"
+  - "^\\s*Follow us"
+  - "^\\s*Newsletter"
+  - "^\\s*ADVERTISEMENT"
+  - "\\[Read (more|also)\\]"
+
+# Per-domain JS init scripts (run before page JS via CDP)
+init_scripts:
+  wsj.com: |
+    Object.defineProperty(document, 'cookie', { get: () => 'subscriber=true' });
+  ft.com: |
+    window.__FT_BARRIER_DISABLED = true;
+
+# Per-domain overrides
+domains:
+  medium.com:
+    proxy_url: "https://freedium-mirror.cfd/"
+    strip_lines:
+      - "Freedium"
+      - "Ko-fi"
+      - "min read ·"
+      - "^\\s*Sign (up|in)"
+      - "Open in app"
+
+  towardsdatascience.com:
+    proxy_url: "https://freedium-mirror.cfd/"
+
+  betterprogramming.pub:
+    proxy_url: "https://freedium-mirror.cfd/"
+
+  digi24.ro:
+    strip_selectors:
+      - .widget-cross
+      - .widget-news
+      - .ad-wrapper
+      - .ad-native
+      - .social
+      - .tags-list
+      - .read-more
+      - .read-more-alt
+      - .section
+    strip_lines:
+      - "Citește și:"
+
+  github.com:
+    strip_selectors:
+      - .Layout-sidebar
+      - .js-header-wrapper
+      - .footer
