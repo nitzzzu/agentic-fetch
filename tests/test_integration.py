@@ -32,10 +32,14 @@ DIGI24_URL = "https://www.digi24.ro"
 @pytest.fixture(scope="module")
 async def browser():
     """Start Chrome once for all browser-dependent tests in this module.
-    Skips the test if Chrome is not installed or fails to start within 20s."""
-    import asyncio
+    Uses a fresh temp profile dir to avoid lock-file issues from previous sessions."""
+    import asyncio, tempfile, os
+    from agentic_fetch import browser as _browser_mod
+    # Give each test run a unique profile so no Chrome lock files interfere
+    fresh_profile = os.path.join(tempfile.gettempdir(), f"af-test-{os.getpid()}")
+    _browser_mod.settings.user_data_dir = fresh_profile
     try:
-        await asyncio.wait_for(browser_pool.start(), timeout=20.0)
+        await asyncio.wait_for(browser_pool.start(), timeout=30.0)
     except (asyncio.TimeoutError, Exception) as e:
         pytest.skip(f"Browser unavailable: {e}")
     yield browser_pool
@@ -101,6 +105,56 @@ class TestSearchAiNews:
         first = ddg_response.results[0]
         assert first.title
         assert first.url.startswith("http")
+
+
+# ---------------------------------------------------------------------------
+# Search: "ai news" via Google (zendriver — real Chrome required)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+async def google_response(browser):
+    """Single Google search for 'ai news', shared across all Google search tests."""
+    req = SearchRequest(query="ai news", engine="google", max_results=5)
+    resp = await _search._google(req)
+    return resp
+
+
+class TestGoogleSearchAiNews:
+    async def test_returns_results(self, google_response):
+        assert google_response.engine_used == "google"
+        assert google_response.query == "ai news"
+        assert len(google_response.results) >= 3, (
+            f"Expected ≥3 results, got {len(google_response.results)}\n"
+            f"Results: {google_response.results}"
+        )
+
+    async def test_all_results_have_valid_urls(self, google_response):
+        for r in google_response.results:
+            assert r.url.startswith("http"), f"Bad URL: {r.url!r}"
+            assert len(r.title) > 0, "Empty title"
+
+    async def test_results_are_ai_related(self, google_response):
+        all_text = " ".join(
+            r.title + " " + r.snippet for r in google_response.results
+        ).lower()
+        ai_terms = [
+            "ai", "artificial intelligence", "llm", "gpt", "openai",
+            "model", "machine learning", "deep learning", "neural",
+        ]
+        assert any(t in all_text for t in ai_terms), (
+            f"No AI-related terms found:\n{all_text[:400]}"
+        )
+
+    async def test_response_model_fields(self, google_response):
+        """SearchResponse fields are all properly populated."""
+        assert google_response.error is None
+        assert google_response.engine_used == "google"
+        first = google_response.results[0]
+        assert first.title
+        assert first.url.startswith("http")
+        # snippet is optional but at least one result should have one
+        snippets = [r.snippet for r in google_response.results if r.snippet]
+        assert len(snippets) >= 1
 
 
 # ---------------------------------------------------------------------------

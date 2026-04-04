@@ -43,10 +43,12 @@ class SearchEngine:
     def _parse_google(self, html: str, limit: int) -> list[SearchResult]:
         soup = BeautifulSoup(html, "html.parser")
         results = []
-        for card in soup.select("div.g")[:limit * 2]:
+        # yuRUbf: the per-result link container used in current Google HTML
+        # Fall back to div.g for older cached pages
+        cards = soup.select("div.yuRUbf") or soup.select("div.g")
+        for card in cards[:limit * 2]:
             a = card.select_one("a[href]")
             title_el = card.select_one("h3")
-            snippet_el = card.select_one("div.VwiC3b, span.st, div[data-sncf]")
             if not a or not title_el:
                 continue
             href = a["href"]
@@ -55,6 +57,16 @@ class SearchEngine:
                 href = parse_qs(urlparse(href).query).get("q", [href])[0]
             if not href.startswith("http"):
                 continue
+            # snippet lives outside the yuRUbf card — look in the ancestor container
+            snippet_el = None
+            ancestor = card.parent
+            for _ in range(4):
+                if ancestor is None:
+                    break
+                snippet_el = ancestor.select_one(".VwiC3b, [data-sncf], span.st")
+                if snippet_el:
+                    break
+                ancestor = ancestor.parent
             results.append(SearchResult(
                 title=title_el.get_text(strip=True),
                 url=href,

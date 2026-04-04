@@ -1,3 +1,4 @@
+import tempfile
 from pydantic_settings import BaseSettings
 from pathlib import Path
 import yaml
@@ -7,8 +8,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     headless: bool = True
-    user_data_dir: str = "/tmp/agentic-fetch-profile"
-    cache_dir: str = "/tmp/agentic-fetch-cache"
+    user_data_dir: str = str(Path(tempfile.gettempdir()) / "agentic-fetch-profile")
+    cache_dir: str = str(Path(tempfile.gettempdir()) / "agentic-fetch-cache")
     cache_ttl: int = 300
     max_browser_tabs: int = 3
     browser_timeout: float = 30.0

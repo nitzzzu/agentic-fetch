@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlparse
 import zendriver as zd
 from .config import settings, SiteConfig
@@ -47,9 +48,10 @@ class BrowserPool:
 
     async def start(self):
         self._site_config = SiteConfig(settings.config_file)
+        user_data_dir = str(Path(settings.user_data_dir).resolve())
         config = zd.Config(
             headless=settings.headless,
-            user_data_dir=settings.user_data_dir,
+            user_data_dir=user_data_dir,
             browser_args=[
                 f"--user-agent={settings.fake_user_agent}",
                 "--no-sandbox",
@@ -128,7 +130,7 @@ class BrowserPool:
 
             if not content_ready.is_set():
                 try:
-                    await asyncio.wait_for(asyncio.shield(tab), timeout=settings.browser_timeout)
+                    await asyncio.wait_for(tab, timeout=settings.browser_timeout)
                 except (asyncio.TimeoutError, Exception):
                     pass
 
