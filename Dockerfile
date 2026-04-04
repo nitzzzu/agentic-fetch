@@ -28,6 +28,7 @@ RUN sed -i 's/\r//' start.sh && chmod +x start.sh
 ENV DISPLAY=:99 \
     PYTHONUNBUFFERED=1 \
     AF_HEADLESS=false \
+    AF_CONTAINER=true \
     AF_USER_DATA_DIR=/data/chrome-profile
 
 EXPOSE 8000 5900 6080

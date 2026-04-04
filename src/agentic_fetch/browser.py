@@ -49,17 +49,17 @@ class BrowserPool:
     async def start(self):
         self._site_config = SiteConfig(settings.config_file)
         user_data_dir = str(Path(settings.user_data_dir).resolve())
+        browser_args = (
+            ["--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking"]
+            if settings.container else []
+        )
         config = zd.Config(
             headless=settings.headless,
             user_data_dir=user_data_dir,
             #user_agent=settings.fake_user_agent,
             browser_connection_timeout=0.5,
             browser_connection_max_tries=60,
-            # browser_args=[
-            #     "--no-sandbox",
-            #     "--disable-dev-shm-usage",
-            #     "--disable-background-networking",
-            # ],
+            browser_args=browser_args,
         )
         self._browser = await zd.start(config)
         self._semaphore = asyncio.Semaphore(settings.max_browser_tabs)

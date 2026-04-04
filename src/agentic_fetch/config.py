@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         "Chrome/132.0.0.0 Safari/537.36"
     )
     config_file: str = "config.yaml"
+    container: bool = False
 
     model_config = {"env_file": ".env", "env_prefix": "AF_"}
 
