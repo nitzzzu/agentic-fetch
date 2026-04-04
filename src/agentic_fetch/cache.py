@@ -42,18 +42,18 @@ class FetchCache:
         if not md_path.exists() or not meta_path.exists():
             return None
         try:
-            meta = CacheMeta(**json.loads(meta_path.read_text()))
+            meta = CacheMeta(**json.loads(meta_path.read_text(encoding="utf-8")))
         except Exception:
             return None
         if time.time() - meta.fetched_at > meta.ttl:
             return None
-        return md_path.read_text(), meta
+        return md_path.read_text(encoding="utf-8"), meta
 
     def get_etag(self, url: str) -> str | None:
         key = self.cache_key(url)
         meta_path = self.cache_dir / f"{key}.meta.json"
         try:
-            meta = CacheMeta(**json.loads(meta_path.read_text()))
+            meta = CacheMeta(**json.loads(meta_path.read_text(encoding="utf-8")))
             return meta.etag or None
         except Exception:
             return None
@@ -62,9 +62,9 @@ class FetchCache:
         key = self.cache_key(url)
         meta_path = self.cache_dir / f"{key}.meta.json"
         try:
-            meta = CacheMeta(**json.loads(meta_path.read_text()))
+            meta = CacheMeta(**json.loads(meta_path.read_text(encoding="utf-8")))
             meta.fetched_at = time.time()
-            meta_path.write_text(json.dumps(asdict(meta)))
+            meta_path.write_text(json.dumps(asdict(meta)), encoding="utf-8")
         except Exception:
             pass
 
@@ -75,9 +75,9 @@ class FetchCache:
         meta = CacheMeta(url=url, fetched_at=time.time(), ttl=self.ttl,
                          content_type=content_type, etag=etag)
         tmp_md = md_path.with_suffix(".tmp")
-        tmp_md.write_text(markdown)
+        tmp_md.write_text(markdown, encoding="utf-8")
         tmp_md.replace(md_path)
-        meta_path.write_text(json.dumps(asdict(meta)))
+        meta_path.write_text(json.dumps(asdict(meta)), encoding="utf-8")
 
     def read_lines(self, url: str, start: int, end: int) -> str | None:
         key = self.cache_key(url)
@@ -85,7 +85,7 @@ class FetchCache:
         if not md_path.exists():
             return None
         from .markdown import read_lines
-        return read_lines(md_path.read_text(), start, end)
+        return read_lines(md_path.read_text(encoding="utf-8"), start, end)
 
     def grep(self, url: str, pattern: str, **kwargs) -> str | None:
         key = self.cache_key(url)
@@ -93,14 +93,14 @@ class FetchCache:
         if not md_path.exists():
             return None
         from .markdown import grep_markdown
-        return grep_markdown(md_path.read_text(), pattern, **kwargs)
+        return grep_markdown(md_path.read_text(encoding="utf-8"), pattern, **kwargs)
 
     def metadata(self, url: str) -> dict | None:
         key = self.cache_key(url)
         md_path = self.cache_dir / f"{key}.md"
         if not md_path.exists():
             return None
-        content = md_path.read_text()
+        content = md_path.read_text(encoding="utf-8")
         lines = content.splitlines()
         return {
             "lines": len(lines),

@@ -130,7 +130,7 @@ class BrowserPool:
 
             if not content_ready.is_set():
                 try:
-                    await asyncio.wait_for(tab, timeout=settings.browser_timeout)
+                    await asyncio.wait_for(asyncio.shield(tab), timeout=settings.browser_timeout)
                 except (asyncio.TimeoutError, Exception):
                     pass
 

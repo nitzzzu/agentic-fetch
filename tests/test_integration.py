@@ -230,13 +230,21 @@ class TestMediumArticle:
 
 # ---------------------------------------------------------------------------
 # digi24.ro news fetch (uses real Chrome for JS-rendered content)
+# One actual fetch is shared; all assertions run against that single response.
 # ---------------------------------------------------------------------------
 
-class TestDigi24Fetch:
-    async def test_homepage_fetched(self, browser):
-        req = FetchRequest(url=DIGI24_URL, max_tokens=8000, no_cache=True)
-        resp = await fetch_engine.fetch(req)
+@pytest.fixture(scope="module")
+async def digi24_response(browser):
+    """Single fetch of digi24.ro homepage, shared across all digi24 tests."""
+    import asyncio
+    req = FetchRequest(url=DIGI24_URL, max_tokens=None, no_cache=True)
+    resp = await asyncio.wait_for(fetch_engine.fetch(req), timeout=60.0)
+    return resp
 
+
+class TestDigi24Fetch:
+    async def test_homepage_fetched(self, digi24_response):
+        resp = digi24_response
         assert resp.url.startswith("https"), f"Unexpected URL: {resp.url!r}"
         assert len(resp.markdown) > 200, (
             f"Homepage too short ({len(resp.markdown)} chars)"
@@ -245,42 +253,25 @@ class TestDigi24Fetch:
             f"Unexpected method: {resp.method_used!r}"
         )
 
-    async def test_homepage_has_romanian_news(self, browser):
-        req = FetchRequest(url=DIGI24_URL, max_tokens=8000, no_cache=True)
-        resp = await fetch_engine.fetch(req)
-
-        md_lower = resp.markdown.lower()
-        news_terms = [
-            "digi24", "știri", "stiri", "news", "romania", "românia",
-            "video", "live",
-        ]
+    async def test_homepage_has_romanian_news(self, digi24_response):
+        md_lower = digi24_response.markdown.lower()
+        news_terms = ["digi24", "știri", "stiri", "news", "romania", "românia", "video", "live"]
         assert any(t in md_lower for t in news_terms), (
-            f"No news-related terms found.\nFirst 400 chars:\n{resp.markdown[:400]}"
+            f"No news-related terms found.\nFirst 400 chars:\n{digi24_response.markdown[:400]}"
         )
 
-    async def test_homepage_has_toc_or_lines(self, browser):
-        req = FetchRequest(url=DIGI24_URL, max_tokens=None, no_cache=True)
-        resp = await fetch_engine.fetch(req)
-
-        assert resp.total_lines > 20, (
-            f"Expected >20 lines, got {resp.total_lines}"
+    async def test_homepage_has_structure(self, digi24_response):
+        assert digi24_response.total_lines > 20, (
+            f"Expected >20 lines, got {digi24_response.total_lines}"
         )
 
-    async def test_ad_selectors_stripped(self, browser):
+    async def test_ad_selectors_stripped(self, digi24_response):
         """config.yaml strips .ad-wrapper and .ad-native from digi24.ro."""
-        req = FetchRequest(url=DIGI24_URL, max_tokens=None, no_cache=True)
+        assert ".ad-wrapper" not in digi24_response.markdown
+        assert ".ad-native" not in digi24_response.markdown
+
+    async def test_cache_hit_on_second_fetch(self, digi24_response):
+        """After the first fetch, a second request should return cached=True."""
+        req = FetchRequest(url=DIGI24_URL, max_tokens=8000, no_cache=False)
         resp = await fetch_engine.fetch(req)
-
-        # Ad class names should not appear in clean markdown output
-        assert ".ad-wrapper" not in resp.markdown
-        assert ".ad-native" not in resp.markdown
-
-    async def test_cache_populated_after_fetch(self, browser):
-        """A second fetch of the same URL should return cached=True."""
-        req_fresh = FetchRequest(url=DIGI24_URL, max_tokens=8000, no_cache=True)
-        await fetch_engine.fetch(req_fresh)
-
-        req_cached = FetchRequest(url=DIGI24_URL, max_tokens=8000, no_cache=False)
-        resp = await fetch_engine.fetch(req_cached)
-
         assert resp.cached is True
