@@ -34,6 +34,7 @@ jobs:
       - name: Extract version tag
         id: meta
         run: |
+          SHORT_SHA="${GITHUB_SHA::8}"
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
@@ -41,7 +42,7 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${REGISTRY}/${IMAGE}:${VERSION}" >> $GITHUB_OUTPUT
-          echo "latest=${REGISTRY}/${IMAGE}:latest" >> $GITHUB_OUTPUT
+          echo "sha_tag=${REGISTRY}/${IMAGE}:${SHORT_SHA}" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -50,6 +51,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.meta.outputs.tag }}
-            ${{ steps.meta.outputs.latest }}
+            ${{ steps.meta.outputs.sha_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
