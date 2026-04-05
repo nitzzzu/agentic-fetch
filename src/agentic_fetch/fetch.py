@@ -41,10 +41,13 @@ class FetchEngine:
         if not req.force_browser:
             plugin_cls = get_plugin(url)
             if plugin_cls:
-                result = await plugin_cls().fetch(url, req)
-                if result is not None:
-                    self._cache_result(result)
-                    return result
+                try:
+                    result = await plugin_cls().fetch(url, req)
+                    if result is not None:
+                        self._cache_result(result)
+                        return result
+                except Exception:
+                    pass  # fall through to Tier 2
 
         # Tier 2: httpx fast path
         html_from_httpx: str | None = None

@@ -25,10 +25,18 @@ class GitHubPlugin(FetchPlugin):
     RE_FILE = re.compile(r'^/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$')
     RE_ISSUE = re.compile(r'^/([^/]+)/([^/]+)/issues/(\d+)$')
     RE_PR = re.compile(r'^/([^/]+)/([^/]+)/pull/(\d+)$')
+    RE_RAW = re.compile(r'^/([^/]+)/([^/]+)/([^/]+)/(.+)$')
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse | None:
         parsed = urlparse(url)
         path = parsed.path.rstrip("/") or "/"
+
+        # raw.githubusercontent.com: /owner/repo/branch/path
+        if parsed.netloc == "raw.githubusercontent.com":
+            if m := self.RE_RAW.match(path):
+                owner, repo, branch, file_path = m.groups()
+                return await self._fetch_file(owner, repo, branch, file_path, req, url)
+            return None
 
         if m := self.RE_TRENDING.match(path):
             lang = (m.group(1) or "").lstrip("/")
@@ -128,7 +136,9 @@ class GitHubPlugin(FetchPlugin):
         if info.get("description"):
             md += f"{info['description']}\n\n"
         md += f"**Stars:** {info['stargazers_count']:,} · **Forks:** {info['forks_count']:,} · "
-        md += f"**Language:** {info.get('language', 'N/A')} · **License:** {info.get('license', {}).get('spdx_id', 'N/A')}\n\n"
+        md += f"**Language:** {info.get('language', 'N/A')} · **License:** {(info.get('license') or {}).get('spdx_id', 'N/A')}\n\n"
+        if info.get("default_branch"):
+            md += f"**Default branch:** `{info['default_branch']}`\n\n"
         if info.get("topics"):
             md += f"**Topics:** {', '.join(info['topics'])}\n\n"
         md += f"[GitHub]({url})\n\n---\n\n"
@@ -142,9 +152,19 @@ class GitHubPlugin(FetchPlugin):
 
     async def _fetch_file(self, owner, repo, branch, path, req, url) -> FetchResponse:
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.get(raw_url)
-            r.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(raw_url)
+                r.raise_for_status()
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            error_msg = f"404 Not Found: {raw_url}" if status == 404 else f"Failed to fetch file: {exc}"
+            md = f"# {path}\n\n**Error:** {error_msg}\n"
+            md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
+            return FetchResponse(url=url, title=path, markdown=md,
+                                 plugin_used=self.name, method_used="plugin",
+                                 error=error_msg,
+                                 truncated=truncated, next_offset=next_offset if truncated else None)
 
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         lang_map = {"py": "python", "ts": "typescript", "js": "javascript",
