@@ -1,5 +1,7 @@
 import re
-import html2text
+from urllib.parse import urljoin, urlparse
+import html_to_markdown
+from html_to_markdown import ConversionOptions
 from bs4 import BeautifulSoup, Tag
 
 TOKENS_PER_CHAR = 0.25  # 4 chars per token
@@ -32,6 +34,17 @@ def _readability_extract(html: str) -> str | None:
         return str(body)
     except Exception:
         return None
+
+
+def _absolutize_links(html: str, base_url: str) -> str:
+    """Resolve relative hrefs/srcs against base_url."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.find_all(True):
+        for attr in ("href", "src"):
+            val = tag.get(attr)
+            if val and not urlparse(val).scheme:
+                tag[attr] = urljoin(base_url, val)
+    return str(soup)
 
 
 class MarkdownExtractor:
@@ -71,16 +84,20 @@ class MarkdownExtractor:
             if clean_html:
                 root = BeautifulSoup(clean_html, "html.parser")
 
-        h = html2text.HTML2Text(baseurl=self.base_url)
-        h.ignore_links = not include_links
-        h.ignore_images = not include_images
-        h.ignore_emphasis = False
-        h.body_width = 0
-        h.unicode_snob = True
-        h.mark_code = True
-        h.skip_internal_links = True
+        html_str = _absolutize_links(str(root), self.base_url) if self.base_url else str(root)
 
-        md = h.handle(str(root))
+        strip_tags: set[str] = set()
+        if not include_links:
+            strip_tags.add("a")
+        if not include_images:
+            strip_tags.add("img")
+
+        opts = ConversionOptions(
+            code_block_style="backticks",
+            skip_images=not include_images,
+            strip_tags=strip_tags or None,
+        )
+        md = html_to_markdown.convert(html_str, options=opts)["content"] or ""
         md = re.sub(r'\n{3,}', '\n\n', md)
         return md.strip()
 
