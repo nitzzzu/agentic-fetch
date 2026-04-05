@@ -1,5 +1,6 @@
 import httpx
-import html2text
+import html_to_markdown
+from html_to_markdown import ConversionOptions
 import re
 from urllib.parse import urlparse, unquote
 
@@ -22,14 +23,15 @@ def _section_to_markdown(html: str, base_url: str, include_links: bool) -> str:
     Bypasses readability — section fragments are already clean, focused HTML
     and are too small to survive readability's content-length thresholds.
     """
-    h = html2text.HTML2Text(baseurl=base_url)
-    h.ignore_links = not include_links
-    h.ignore_images = True
-    h.body_width = 0
-    h.unicode_snob = True
-    h.mark_code = True
-    h.skip_internal_links = True
-    md = h.handle(html)
+    strip_tags: set[str] = set()
+    if not include_links:
+        strip_tags.add("a")
+    opts = ConversionOptions(
+        skip_images=True,
+        strip_tags=strip_tags or None,
+        code_block_style="backticks",
+    )
+    md = html_to_markdown.convert(html, options=opts)["content"] or ""
     return re.sub(r'\n{3,}', '\n\n', md).strip()
 
 

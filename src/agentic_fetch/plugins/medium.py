@@ -1,7 +1,8 @@
 import httpx
 import re
 from bs4 import BeautifulSoup
-import html2text
+import html_to_markdown
+from html_to_markdown import ConversionOptions
 from urllib.parse import urlparse
 
 from .base import FetchPlugin
@@ -59,14 +60,15 @@ class MediumPlugin(FetchPlugin):
             for el in soup.select(sel):
                 el.decompose()
 
-        h = html2text.HTML2Text()
-        h.ignore_links = not req.include_links
-        h.ignore_images = not req.include_images
-        h.body_width = 0
-        h.unicode_snob = True
-        h.mark_code = True
-
-        raw_md = h.handle(resp.text)
+        strip_tags: set[str] = set()
+        if not req.include_links:
+            strip_tags.add("a")
+        opts = ConversionOptions(
+            skip_images=not req.include_images,
+            strip_tags=strip_tags or None,
+            code_block_style="backticks",
+        )
+        raw_md = html_to_markdown.convert(resp.text, options=opts)["content"] or ""
         md = self._clean(raw_md, title)
 
         if author:

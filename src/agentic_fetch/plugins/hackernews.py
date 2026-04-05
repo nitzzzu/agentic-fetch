@@ -1,5 +1,6 @@
 import httpx
-import html2text
+import html_to_markdown
+from html_to_markdown import ConversionOptions
 import re
 from html import unescape
 
@@ -7,17 +8,15 @@ from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..markdown import paginate
 
+_HN_OPTS = ConversionOptions(skip_images=True)
+
 
 def _html_to_text(html: str, base_url: str = "") -> str:
     """Convert HN comment/story HTML to clean markdown."""
     if not html:
         return ""
-    h = html2text.HTML2Text(baseurl=base_url)
-    h.ignore_links = False
-    h.ignore_images = True
-    h.body_width = 0
-    h.unicode_snob = True
-    return h.handle(unescape(html)).strip()
+    md = html_to_markdown.convert(unescape(html), options=_HN_OPTS)["content"] or ""
+    return md.strip()
 
 
 class HackerNewsPlugin(FetchPlugin):
