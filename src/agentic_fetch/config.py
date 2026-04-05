@@ -44,8 +44,14 @@ class SiteConfig:
 
     def _domain_cfg(self, url: str) -> dict:
         from urllib.parse import urlparse
-        host = urlparse(url).netloc.lower().lstrip("www.")
-        return self._domains.get(host, self._domains.get(f"www.{host}", {}))
+        host = urlparse(url).netloc.lower()
+        # Try progressively shorter suffixes: edition.cnn.com → cnn.com → com
+        parts = host.split(".")
+        for i in range(len(parts) - 1):
+            candidate = ".".join(parts[i:])
+            if candidate in self._domains:
+                return self._domains[candidate]
+        return {}
 
     def selectors_for(self, url: str) -> list[str]:
         return self._global_selectors + self._domain_cfg(url).get("strip_selectors", [])

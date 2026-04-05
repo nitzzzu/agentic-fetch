@@ -19,6 +19,11 @@ strip_lines:
   - "^\\s*Newsletter"
   - "^\\s*ADVERTISEMENT"
   - "\\[Read (more|also)\\]"
+  - "^\\s*Ad Feedback\\s*$"
+  - "^\\s*(Facebook|Tweet|Email|Link|Threads)\\s*$"
+  - "^\\s*Link Copied!\\s*$"
+  - "^\\s*Scan the QR code"
+  - "^\\s*Follow\\s*$"
 
 # Per-domain JS init scripts (run before page JS via CDP)
 init_scripts:

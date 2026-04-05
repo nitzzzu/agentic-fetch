@@ -5,8 +5,38 @@ from bs4 import BeautifulSoup, Tag
 TOKENS_PER_CHAR = 0.25  # 4 chars per token
 
 
+def _readability_extract(html: str) -> str | None:
+    """Extract main article content using readability-lxml. Returns clean HTML or None on failure.
+
+    Falls back to None when the original page is JS-heavy and readability ends up
+    with less content than the raw stripped HTML (e.g. news homepages loaded via httpx).
+    """
+    try:
+        from readability import Document
+        doc = Document(html)
+        summary = doc.summary()
+        # Readability returns a full HTML doc; unwrap to just the body content
+        soup = BeautifulSoup(summary, "html.parser")
+        body = soup.find("body") or soup
+        extracted_text = body.get_text(separator="\n", strip=True)
+        # Require enough non-empty lines — guards against JS-heavy pages where
+        # httpx fetches only script tags and readability extracts almost nothing
+        meaningful_lines = [l for l in extracted_text.splitlines() if len(l.strip()) > 20]
+        if len(meaningful_lines) < 5:
+            return None
+        # Also sanity-check against original: if readability extracted less than 10%
+        # of the original text, it likely stripped too much (JS-heavy shell page)
+        original_text = BeautifulSoup(html, "html.parser").get_text(strip=True)
+        if original_text and len(extracted_text) < len(original_text) * 0.10:
+            return None
+        return str(body)
+    except Exception:
+        return None
+
+
 class MarkdownExtractor:
     def __init__(self, html: str, base_url: str = ""):
+        self._raw_html = html
         self.soup = BeautifulSoup(html, "html.parser")
         self.base_url = base_url
 
@@ -34,6 +64,12 @@ class MarkdownExtractor:
             el = self.soup.select_one(selector)
             if el:
                 root = el
+        else:
+            # Use readability to extract main content and strip boilerplate
+            # (nav, footer, sidebar, ads) — inspired by python-readability workflow
+            clean_html = _readability_extract(self._raw_html)
+            if clean_html:
+                root = BeautifulSoup(clean_html, "html.parser")
 
         h = html2text.HTML2Text(baseurl=self.base_url)
         h.ignore_links = not include_links
