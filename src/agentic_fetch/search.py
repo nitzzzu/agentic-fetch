@@ -23,21 +23,9 @@ class SearchEngine:
         return SearchResponse(query=req.query, engine_used="google", results=results)
 
     async def _duckduckgo(self, req: SearchRequest) -> SearchResponse:
-        url = f"https://html.duckduckgo.com/html/?q={quote_plus(req.query)}"
-        async with httpx.AsyncClient(
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/132.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://duckduckgo.com/",
-            },
-            follow_redirects=True, timeout=10,
-        ) as c:
-            r = await c.get(url)
-            r.raise_for_status()
-        results = self._parse_ddg(r.text, req.max_results)
+        url = f"https://duckduckgo.com/?q={quote_plus(req.query)}&ia=web"
+        html, _, _ = await browser_pool.get_html(url)
+        results = self._parse_ddg(html, req.max_results)
         return SearchResponse(query=req.query, engine_used="duckduckgo", results=results)
 
     def _parse_google(self, html: str, limit: int) -> list[SearchResult]:
@@ -77,22 +65,14 @@ class SearchEngine:
         return results
 
     def _parse_ddg(self, html: str, limit: int) -> list[SearchResult]:
-        from urllib.parse import parse_qs, urlparse, unquote
         soup = BeautifulSoup(html, "html.parser")
         results = []
-        for card in soup.select(".result.results_links_deep")[:limit]:
-            title_el = card.select_one(".result__title a")
-            snippet_el = card.select_one(".result__snippet")
+        for card in soup.select("article[data-testid='result']"):
+            title_el = card.select_one("h2 a")
+            snippet_el = card.select_one("[data-result='snippet']")
             if not title_el:
                 continue
             href = title_el.get("href", "")
-            # Normalise protocol-relative URLs
-            if href.startswith("//"):
-                href = "https:" + href
-            # Unwrap DDG redirect URLs: //duckduckgo.com/l/?uddg=<encoded-url>
-            if "duckduckgo.com/l/" in href:
-                qs = parse_qs(urlparse(href).query)
-                href = unquote(qs.get("uddg", [href])[0])
             if not href.startswith("http"):
                 continue
             results.append(SearchResult(
@@ -100,6 +80,8 @@ class SearchEngine:
                 url=href,
                 snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
             ))
+            if len(results) >= limit:
+                break
         return results
 
 

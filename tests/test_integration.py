@@ -55,7 +55,7 @@ async def browser():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-async def ddg_response():
+async def ddg_response(browser):
     """Single DuckDuckGo request for 'ai news', shared across all search tests.
     Retries once after a short delay to handle transient rate-limiting."""
     import asyncio

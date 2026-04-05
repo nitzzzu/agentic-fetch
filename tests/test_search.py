@@ -22,22 +22,24 @@ GOOGLE_HTML = """
 
 DDG_HTML = """
 <html><body>
-  <div class="result results_links results_links_deep web-result">
-    <h2 class="result__title">
-      <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage">DDG Result</a>
-    </h2>
-    <span class="result__snippet">DDG snippet here.</span>
-  </div>
-  <div class="result results_links results_links_deep web-result">
-    <h2 class="result__title">
-      <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fanother.com%2Fpage">Second Result</a>
-    </h2>
-  </div>
-  <div class="result results_links results_links_deep web-result">
-    <h2 class="result__title">
-      <a class="result__a" href="/relative">Relative Link</a>
-    </h2>
-  </div>
+  <ol class="react-results--main">
+    <li>
+      <article data-testid="result">
+        <h2><a href="https://example.com/page">DDG Result</a></h2>
+        <div data-result="snippet">DDG snippet here.</div>
+      </article>
+    </li>
+    <li>
+      <article data-testid="result">
+        <h2><a href="https://another.com/page">Second Result</a></h2>
+      </article>
+    </li>
+    <li>
+      <article data-testid="result">
+        <h2><a href="/relative">Relative Link</a></h2>
+      </article>
+    </li>
+  </ol>
 </body></html>
 """
 
