@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     )
     config_file: str = "config.yaml"
     container: bool = False
+    wikipedia_user_agent: str = "KnowledgeBot/2.0 (https://example.com)"
 
     model_config = {"env_file": ".env", "env_prefix": "AF_"}
 
