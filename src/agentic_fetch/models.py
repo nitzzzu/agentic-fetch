@@ -1,11 +1,47 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal
 
 
 class SearchRequest(BaseModel):
     query: str
     max_results: int = 10
-    engine: Literal["google", "duckduckgo", "auto"] = "auto"
+    engine: Literal["google", "duckduckgo", "reddit", "github", "hackernews", "auto"] = "auto"
+
+    # Date filters — Google (tbs), GitHub (created: qualifier), HackerNews (numericFilters)
+    date_from: str | None = Field(default=None, description="Filter results after this date (YYYY-MM-DD). Google, GitHub, HackerNews.")
+    date_to: str | None = Field(default=None, description="Filter results before this date (YYYY-MM-DD). Google, GitHub, HackerNews.")
+    date_preset: Literal["past_hour", "past_day", "past_week", "past_month", "past_year"] | None = Field(
+        default=None, description="Quick date preset for Google. Takes precedence over date_from/date_to."
+    )
+
+    # Sort — Reddit: relevance|hot|top|new|comments; GitHub repos: stars|forks|updated
+    sort: str | None = Field(
+        default=None,
+        description="Sort order. Reddit: relevance|hot|top|new|comments. GitHub repos: stars|forks|updated (default: stars).",
+    )
+
+    # Reddit: time window filter, most useful with sort=top
+    time_filter: Literal["hour", "day", "week", "month", "year", "all"] | None = Field(
+        default=None, description="Reddit time window (default: all). Works with any sort."
+    )
+
+    # GitHub filters
+    search_type: Literal["repositories", "code"] | None = Field(
+        default=None, description="GitHub search scope (default: repositories)."
+    )
+    language: str | None = Field(
+        default=None, description="Programming language filter. GitHub search and trending."
+    )
+    period: Literal["daily", "weekly", "monthly"] | None = Field(
+        default=None, description="GitHub trending period (default: daily). Used when query is empty or 'trending'."
+    )
+
+    # HackerNews filters
+    min_points: int | None = Field(default=None, description="HackerNews: minimum points threshold.")
+    min_comments: int | None = Field(default=None, description="HackerNews: minimum comments threshold.")
+    story_type: Literal["story", "comment"] | None = Field(
+        default=None, description="HackerNews item type to search (default: story)."
+    )
 
 
 class SearchResult(BaseModel):
