@@ -5,7 +5,7 @@ from typing import Literal
 class SearchRequest(BaseModel):
     query: str
     max_results: int = 10
-    engine: Literal["google", "duckduckgo", "reddit", "github", "hackernews", "auto"] = "auto"
+    engine: Literal["google", "duckduckgo", "reddit", "github", "hackernews", "goggames", "cache", "auto"] = "auto"
 
     # Date filters — Google (tbs), GitHub (created: qualifier), HackerNews (numericFilters)
     date_from: str | None = Field(default=None, description="Filter results after this date (YYYY-MM-DD). Google, GitHub, HackerNews.")
@@ -86,7 +86,7 @@ class FetchResponse(BaseModel):
     title: str
     markdown: str
     plugin_used: str | None = None
-    method_used: Literal["plugin", "httpx", "httpx+browser", "zendriver"]
+    method_used: Literal["plugin", "httpx", "curl_cffi", "httpx+browser", "zendriver"]
     cached: bool = False
     truncated: bool = False
     next_offset: int | None = None
@@ -109,3 +109,8 @@ class GrepRequest(BaseModel):
     context_lines: int = 2
     ignore_case: bool = False
     max_matches: int = 50
+
+
+class CacheWriteRequest(BaseModel):
+    url: str
+    markdown: str

@@ -63,6 +63,10 @@ class SearchEngine:
             return await self._github(req)
         if req.engine == "hackernews":
             return await self._hackernews(req)
+        if req.engine == "goggames":
+            return await self._goggames(req)
+        if req.engine == "cache":
+            return self._cache_search(req)
         if req.engine in ("auto", "google"):
             try:
                 return await self._google(req)
@@ -524,6 +528,57 @@ class SearchEngine:
             results.append(SearchResult(title=title, url=story_url, snippet=snippet))
 
         return SearchResponse(query=req.query, engine_used="hackernews", results=results)
+
+    # ── Session cache BM25 ────────────────────────────────────────────────────
+
+    def _cache_search(self, req: SearchRequest) -> SearchResponse:
+        from .cache import fetch_cache
+        hits = fetch_cache.search(req.query, limit=req.max_results)
+        results = [
+            SearchResult(title=h["title"], url=h["url"],
+                         snippet=f"score {h['score']} — {h['snippet']}")
+            for h in hits
+        ]
+        return SearchResponse(query=req.query, engine_used="cache", results=results)
+
+    # ── GOG Games ─────────────────────────────────────────────────────────────
+
+    async def _goggames(self, req: SearchRequest) -> SearchResponse:
+        import re as _re
+        url = f"https://gog-games.to/?search={quote_plus(req.query)}"
+        html, _, _ = await browser_pool.get_html(url)
+        soup = BeautifulSoup(html, "html.parser")
+        results = []
+        for a in soup.select("a.card"):
+            href = a.get("href", "")
+            if not href.startswith("/game/"):
+                continue
+            text = a.get_text(strip=True)
+            is_mod = text.startswith("MOD")
+            if is_mod:
+                text = text[3:]
+            # Split "[Game]X days" → title + last-updated stamp
+            m = _re.match(r"^(.*?)(\d+\s+(?:hr|day|mo|yr)s?)\s*$", text)
+            if m:
+                title   = m.group(1).strip()
+                updated = m.group(2).strip()
+            else:
+                title   = text.strip()
+                updated = ""
+            full_url = f"https://gog-games.to{href}"
+            snippet_parts = []
+            if is_mod:
+                snippet_parts.append("[MOD]")
+            if updated:
+                snippet_parts.append(f"Updated {updated} ago")
+            results.append(SearchResult(
+                title=title,
+                url=full_url,
+                snippet=" · ".join(snippet_parts),
+            ))
+            if len(results) >= req.max_results:
+                break
+        return SearchResponse(query=req.query, engine_used="goggames", results=results)
 
     # ── Parsers ───────────────────────────────────────────────────────────────
 
