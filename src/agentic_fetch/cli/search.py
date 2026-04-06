@@ -163,6 +163,8 @@ Examples:
             return
 
         print(f"# Search: {data['query']} ({data['engine_used']})\n")
+        if data.get("error"):
+            print(f"⚠  {data['error']}\n", file=sys.stderr)
         for i, res in enumerate(data["results"], 1):
             print(f"{i}. **{res['title']}**")
             print(f"   {res['url']}")
