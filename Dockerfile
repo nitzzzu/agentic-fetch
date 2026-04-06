@@ -1,7 +1,7 @@
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget gnupg ca-certificates dumb-init \
+    wget gnupg ca-certificates dumb-init supervisor \
     xvfb x11vnc x11-utils fluxbox eterm curl \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
@@ -23,6 +23,7 @@ COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev && pip install --no-cache-dir numpy
 
 COPY . .
+COPY supervisord.conf /etc/supervisord.conf
 RUN sed -i 's/\r//' start.sh && chmod +x start.sh \
     && mkdir -p /root/.fluxbox \
     && printf '%s\n' \
