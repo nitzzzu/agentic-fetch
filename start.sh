@@ -25,7 +25,7 @@ until xdpyinfo -display :99 > /dev/null 2>&1; do
 done
 echo "Xvfb ready"
 
-fluxbox 2>/dev/null &
+DBUS_SESSION_BUS_ADDRESS=/dev/null fluxbox 2>/dev/null &
 
 # VNC server (raw port 5900)
 x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet &

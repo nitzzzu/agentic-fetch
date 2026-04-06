@@ -25,7 +25,12 @@ RUN uv sync --frozen --no-dev && pip install --no-cache-dir numpy
 COPY . .
 RUN sed -i 's/\r//' start.sh && chmod +x start.sh \
     && mkdir -p /root/.fluxbox \
-    && echo "session.screen0.rootCommand: true" > /root/.fluxbox/init
+    && printf '%s\n' \
+        "session.screen0.rootCommand: true" \
+        "session.screen0.toolbar.visible: false" \
+        "session.screen0.slit.visible: false" \
+        "session.screen0.workspaces: 1" \
+        > /root/.fluxbox/init
 
 ENV DISPLAY=:99 \
     PYTHONUNBUFFERED=1 \
