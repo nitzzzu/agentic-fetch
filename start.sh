@@ -2,10 +2,30 @@
 set -e
 mkdir -p /data/chrome-profile
 
-# Virtual display
+# Clean up stale X lock files from previous runs
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+
+# Clean up stale Chrome singleton locks from previous crashes
+rm -f /data/chrome-profile/SingletonLock \
+      /data/chrome-profile/SingletonCookie \
+      /data/chrome-profile/SingletonSocket
+
+# Virtual display — wait until actually ready
 Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
-sleep 1
-fluxbox &
+XVFB_PID=$!
+timeout=10
+count=0
+until xdpyinfo -display :99 > /dev/null 2>&1; do
+    count=$((count+1))
+    if [ $count -gt $timeout ]; then
+        echo "ERROR: Xvfb failed to start"
+        exit 1
+    fi
+    sleep 1
+done
+echo "Xvfb ready"
+
+fluxbox 2>/dev/null &
 
 # VNC server (raw port 5900)
 x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet &

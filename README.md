@@ -202,7 +202,7 @@ Environment variables (prefix `AF_`):
 ## Docker
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 
 # View browser (useful for debugging Cloudflare / login pages)
 open http://localhost:6080/vnc.html

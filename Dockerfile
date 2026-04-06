@@ -2,7 +2,7 @@ FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget gnupg ca-certificates dumb-init \
-    xvfb x11vnc fluxbox curl \
+    xvfb x11vnc x11-utils fluxbox eterm curl \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] \
@@ -13,17 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && git clone --depth 1 https://github.com/novnc/noVNC.git /usr/share/novnc \
-    && git clone --depth 1 https://github.com/novnc/websockify /usr/share/websockify \
+    && git clone --depth 1 https://github.com/novnc/websockify /usr/share/novnc/utils/websockify \
     && apt-get purge -y git && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev && pip install --no-cache-dir numpy
 
 COPY . .
-RUN sed -i 's/\r//' start.sh && chmod +x start.sh
+RUN sed -i 's/\r//' start.sh && chmod +x start.sh \
+    && mkdir -p /root/.fluxbox \
+    && echo "session.screen0.rootCommand: true" > /root/.fluxbox/init
 
 ENV DISPLAY=:99 \
     PYTHONUNBUFFERED=1 \
