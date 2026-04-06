@@ -7,6 +7,19 @@ from .config import settings, SiteConfig, detect_content_type
 from .plugins import get_plugin
 from .cache import fetch_cache
 
+_CHALLENGE_SIGNALS = [
+    "just a moment",            # Cloudflare
+    "cf-browser-verification",
+    "cf_chl_opt",
+    "challenge-platform",
+    "aws-waf-token",            # AWS WAF
+    "x-amz-waf-token",
+    "__ddg",                    # DataDome
+    "datadome",
+    "px-captcha",               # PerimeterX
+    "_pxhd",
+]
+
 site_config = SiteConfig(settings.config_file)
 
 
@@ -79,7 +92,9 @@ class FetchEngine:
                     md = apply_strip_lines(html_from_httpx, site_config.strip_lines_for(url))
                     fetch_cache.put(url, md, "markdown", etag=resp_etag)
                     return self._build_from_md(md, url, "httpx", req=req)
-                if not self._needs_js(html_from_httpx):
+                if self._is_challenge_page(html_from_httpx):
+                    html_from_httpx = None  # discard — let curl_cffi retry
+                elif not self._needs_js(html_from_httpx):
                     strip_sels = site_config.selectors_for(final_url_from_httpx)
                     strip_lines = site_config.strip_lines_for(url)
                     return self._build_response(
@@ -89,7 +104,24 @@ class FetchEngine:
             except Exception:
                 pass
 
-        # Tier 2.5: httpx HTML loaded into browser via data: URL
+        # Tier 2.5: curl_cffi (bot-bypass — triggered when httpx failed or returned a challenge)
+        if not req.force_browser and html_from_httpx is None:
+            curl_result = await self._curl_cffi_fetch(fetch_url)
+            if curl_result:
+                curl_html, curl_final_url = curl_result
+                if not self._is_challenge_page(curl_html):
+                    if not self._needs_js(curl_html):
+                        strip_sels = site_config.selectors_for(curl_final_url)
+                        strip_lines = site_config.strip_lines_for(url)
+                        return self._build_response(
+                            curl_html, curl_final_url, req, "curl_cffi",
+                            strip_sels, strip_lines,
+                        )
+                    # needs JS — pass curl_cffi HTML to the browser tier (better than nothing)
+                    html_from_httpx = curl_html
+                    final_url_from_httpx = curl_final_url
+
+        # Tier 3: httpx HTML loaded into browser via data: URL
         if html_from_httpx and not req.force_browser:
             try:
                 html, final_url, intercepted_json = await browser_pool.execute_html(
@@ -112,7 +144,7 @@ class FetchEngine:
             except Exception:
                 pass
 
-        # Tier 3: zendriver
+        # Tier 4: zendriver
         html, final_url, intercepted_json = await browser_pool.get_html(req.url)
         strip_sels = site_config.selectors_for(final_url)
 
@@ -167,6 +199,27 @@ class FetchEngine:
             ct = r.headers.get("content-type", "")
             resp_etag = r.headers.get("etag", "")
             return r.text, str(r.url), resp_etag, ct
+
+    def _is_challenge_page(self, html: str) -> bool:
+        sample = html[:5000].lower()
+        return any(sig in sample for sig in _CHALLENGE_SIGNALS)
+
+    async def _curl_cffi_fetch(self, url: str) -> tuple[str, str] | None:
+        try:
+            from curl_cffi.requests import AsyncSession
+            async with AsyncSession(impersonate="chrome") as s:
+                r = await s.get(
+                    url,
+                    timeout=settings.httpx_timeout,
+                    allow_redirects=True,
+                )
+                if r.status_code == 200:
+                    return r.text, str(r.url)
+        except ImportError:
+            pass  # curl_cffi not installed — skip tier
+        except Exception:
+            pass
+        return None
 
     def _json_to_markdown(self, data: dict, req: FetchRequest) -> str:
         for key in ("content", "body", "article", "text", "html", "description", "selftext"):

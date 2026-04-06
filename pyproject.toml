@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml>=6.0",
     "markdownify>=0.13",
     "readability-lxml>=0.8.4.1",
+    "curl-cffi>=0.7",
 ]
 
 [project.optional-dependencies]
