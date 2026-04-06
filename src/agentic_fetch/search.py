@@ -17,7 +17,8 @@ _GITHUB_HEADERS = {
 _REDDIT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json",
+    "Accept": "application/json, text/html, */*",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 _TREND_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -112,13 +113,89 @@ class SearchEngine:
     async def _reddit(self, req: SearchRequest) -> SearchResponse:
         sort = req.sort or "relevance"
         time_filter = req.time_filter or "all"
+
+        # Parse 'subreddit:Name' prefix from query
+        query = req.query.strip()
+        subreddit = req.subreddit
+        if not subreddit:
+            import re as _re
+            m = _re.match(r"subreddit:(\w+)\s*", query, _re.IGNORECASE)
+            if m:
+                subreddit = m.group(1)
+                query = query[m.end():].strip()
+
+        # When browsing a subreddit with no search query, use listing endpoint
+        if subreddit and not query:
+            listing_sort = sort if sort in ("hot", "new", "top", "rising") else "hot"
+            listing_params: dict = {"limit": req.max_results}
+            if listing_sort == "top" and time_filter:
+                listing_params["t"] = time_filter
+            json_url = f"https://www.reddit.com/r/{subreddit}/{listing_sort}.json"
+            try:
+                async with httpx.AsyncClient(
+                    headers=_REDDIT_HEADERS, follow_redirects=True, timeout=30
+                ) as c:
+                    r = await _get_with_retry(c, json_url, params=listing_params)
+                    if r.status_code == 429:
+                        return SearchResponse(
+                            query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                            error="Reddit rate limit (429). Try again in a few seconds.",
+                        )
+                    if r.headers.get("content-type", "").startswith("text/html"):
+                        return SearchResponse(
+                            query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                            error="Reddit blocked the request (returned HTML). Retry shortly.",
+                        )
+                    r.raise_for_status()
+                    data = _decode_json(r)
+            except httpx.HTTPStatusError as e:
+                return SearchResponse(
+                    query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                    error=f"Reddit HTTP {e.response.status_code}: {e.response.text[:200]}",
+                )
+            except httpx.RequestError as e:
+                return SearchResponse(
+                    query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                    error=f"Reddit request failed: {e}",
+                )
+
+            results = []
+            for child in data.get("data", {}).get("children", []):
+                if child.get("kind") != "t3":
+                    continue
+                post = child.get("data", {})
+                title = unescape(post.get("title", ""))
+                permalink = post.get("permalink", "")
+                url = f"https://www.reddit.com{permalink}" if permalink.startswith("/") else permalink
+                sub = post.get("subreddit", "")
+                author = post.get("author", "")
+                score = post.get("score", 0)
+                num_comments = post.get("num_comments", 0)
+                created = datetime.utcfromtimestamp(post.get("created_utc", 0)).strftime("%Y-%m-%d")
+                snippet = (f"**r/{sub}** · u/{author} · {created} "
+                           f"· {score:,} pts · {num_comments:,} comments")
+                selftext = post.get("selftext", "")
+                if selftext and selftext not in ("[deleted]", "[removed]"):
+                    preview = unescape(selftext)[:200]
+                    snippet += f"\n> {preview}{'…' if len(selftext) > 200 else ''}"
+                results.append(SearchResult(title=title, url=url, snippet=snippet))
+
+            return SearchResponse(query=req.query, engine_used=f"reddit/r/{subreddit}", results=results)
+
         params: dict = {
-            "q": req.query,
+            "q": query,
             "type": "link",
             "sort": sort,
             "t": time_filter,
             "limit": req.max_results,
         }
+
+        # Scope search to subreddit when specified
+        if subreddit:
+            search_url = f"https://www.reddit.com/r/{subreddit}/search.json"
+            params["restrict_sr"] = "1"
+        else:
+            search_url = "https://www.reddit.com/search.json"
 
         # date_from / date_to are not supported by Reddit's search API
         unsupported = []
@@ -135,7 +212,7 @@ class SearchEngine:
             async with httpx.AsyncClient(
                 headers=_REDDIT_HEADERS, follow_redirects=True, timeout=30
             ) as c:
-                r = await _get_with_retry(c, "https://www.reddit.com/search.json", params=params)
+                r = await _get_with_retry(c, search_url, params=params)
                 if r.status_code == 429:
                     return SearchResponse(
                         query=req.query, engine_used="reddit", results=[],
@@ -168,12 +245,12 @@ class SearchEngine:
             title = unescape(post.get("title", ""))
             permalink = post.get("permalink", "")
             url = f"https://www.reddit.com{permalink}" if permalink.startswith("/") else permalink
-            subreddit = post.get("subreddit", "")
+            post_subreddit = post.get("subreddit", "")
             author = post.get("author", "")
             score = post.get("score", 0)
             num_comments = post.get("num_comments", 0)
             created = datetime.utcfromtimestamp(post.get("created_utc", 0)).strftime("%Y-%m-%d")
-            snippet = (f"**r/{subreddit}** · u/{author} · {created} "
+            snippet = (f"**r/{post_subreddit}** · u/{author} · {created} "
                        f"· {score:,} pts · {num_comments:,} comments")
             selftext = post.get("selftext", "")
             if selftext and selftext not in ("[deleted]", "[removed]"):
@@ -181,8 +258,9 @@ class SearchEngine:
                 snippet += f"\n> {preview}{'…' if len(selftext) > 200 else ''}"
             results.append(SearchResult(title=title, url=url, snippet=snippet))
 
+        engine_used = f"reddit/r/{subreddit}" if subreddit else "reddit"
         return SearchResponse(
-            query=req.query, engine_used="reddit", results=results, error=warning
+            query=req.query, engine_used=engine_used, results=results, error=warning
         )
 
     # ── GitHub ────────────────────────────────────────────────────────────────

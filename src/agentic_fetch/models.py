@@ -25,6 +25,12 @@ class SearchRequest(BaseModel):
         default=None, description="Reddit time window (default: all). Works with any sort."
     )
 
+    # Reddit: subreddit scope — also parsed from 'subreddit:Name' query prefix
+    subreddit: str | None = Field(
+        default=None,
+        description="Restrict Reddit search to this subreddit. Also parsed from 'subreddit:Name' in query.",
+    )
+
     # GitHub filters
     search_type: Literal["repositories", "code"] | None = Field(
         default=None, description="GitHub search scope (default: repositories)."

@@ -40,6 +40,9 @@ agentic-search "LLM agents" --engine google --date-from 2025-01-01 --date-to 202
 # Search — Reddit
 agentic-search "agentic AI" --engine reddit --sort top --time-filter week
 agentic-search "best Python library" --engine reddit --sort new
+# Subreddit browsing — prefix query with 'subreddit:Name' or leave query empty with --subreddit
+agentic-search "subreddit:Romania" --engine reddit --sort hot
+agentic-search "subreddit:Romania elections" --engine reddit --sort new
 
 # Search — GitHub (repositories)
 agentic-search "vector database" --engine github --sort stars --language python
@@ -87,6 +90,7 @@ agentic-fetch "https://example.com" --json             # full response with TOC
 | `date_preset` | `past_hour\|past_day\|past_week\|past_month\|past_year` | google | Quick preset (overrides date_from/to) |
 | `sort` | string | reddit, github | Reddit: `relevance\|hot\|top\|new\|comments`; GitHub repos: `stars\|forks\|updated` |
 | `time_filter` | `hour\|day\|week\|month\|year\|all` | reddit | Time window (default: `all`) |
+| `subreddit` | string | reddit | Restrict to a subreddit. Also parsed from `subreddit:Name` query prefix. When no query remains, browses the listing directly (hot/new/top/rising). |
 | `search_type` | `repositories\|code` | github | Search scope (default: `repositories`) |
 | `language` | string | github | Language filter for search and trending |
 | `period` | `daily\|weekly\|monthly` | github | Trending period (default: `daily`) |
