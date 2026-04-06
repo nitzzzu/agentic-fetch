@@ -50,7 +50,7 @@ class BrowserPool:
         self._site_config = SiteConfig(settings.config_file)
         user_data_dir = str(Path(settings.user_data_dir).resolve())
         browser_args = (
-            ["--no-sandbox"] #  "--disable-dev-shm-usage", "--disable-background-networking"
+            ["--no-sandbox", "--start-maximized"] #  "--disable-dev-shm-usage", "--disable-background-networking"
             if settings.container else []
         )
         config = zd.Config(

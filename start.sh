@@ -28,7 +28,7 @@ echo "Xvfb ready"
 fluxbox 2>/dev/null &
 
 # VNC server (raw port 5900)
-x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet &
+x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet &
 
 # noVNC web interface (port 6080)
 /usr/share/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
