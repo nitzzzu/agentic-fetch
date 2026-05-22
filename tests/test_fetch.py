@@ -1,5 +1,4 @@
 """Tests for FetchEngine utility methods."""
-import pytest
 from agentic_fetch.fetch import FetchEngine
 from agentic_fetch.models import FetchRequest
 

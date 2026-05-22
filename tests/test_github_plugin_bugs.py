@@ -9,7 +9,6 @@ Tests for four bugs in the GitHub plugin and fetch engine:
 import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
-from respx import MockRouter
 
 from agentic_fetch.plugins.github import GitHubPlugin
 from agentic_fetch.models import FetchRequest, FetchResponse
@@ -32,17 +31,14 @@ class TestFetchFileOn404:
         plugin = GitHubPlugin()
         req = make_req("https://github.com/owner/repo/blob/main/README.md")
 
-        with patch("agentic_fetch.plugins.github.httpx.AsyncClient") as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "404", request=MagicMock(), response=MagicMock(status_code=404)
-            )
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404", request=MagicMock(), response=MagicMock(status_code=404)
+        )
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
 
+        with patch("agentic_fetch.plugins.github.get_client", return_value=mock_client):
             # Must NOT raise — must return a FetchResponse
             result = await plugin._fetch_file("owner", "repo", "main", "README.md", req,
                                                "https://github.com/owner/repo/blob/main/README.md")
@@ -55,13 +51,9 @@ class TestFetchFileOn404:
         plugin = GitHubPlugin()
         req = make_req("https://github.com/owner/repo/blob/main/README.md")
 
-        with patch("agentic_fetch.plugins.github.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
-            mock_client_cls.return_value = mock_client
-
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
+        with patch("agentic_fetch.plugins.github.get_client", return_value=mock_client):
             result = await plugin._fetch_file("owner", "repo", "main", "README.md", req,
                                                "https://github.com/owner/repo/blob/main/README.md")
 
@@ -73,16 +65,12 @@ class TestFetchFileOn404:
         plugin = GitHubPlugin()
         req = make_req("https://github.com/owner/repo/blob/main/README.md")
 
-        with patch("agentic_fetch.plugins.github.httpx.AsyncClient") as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()  # no-op
-            mock_resp.text = "# Hello\n\nThis is the readme."
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
-
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()  # no-op
+        mock_resp.text = "# Hello\n\nThis is the readme."
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        with patch("agentic_fetch.plugins.github.get_client", return_value=mock_client):
             result = await plugin._fetch_file("owner", "repo", "main", "README.md", req,
                                                "https://github.com/owner/repo/blob/main/README.md")
 
@@ -113,21 +101,17 @@ class TestFetchRepoDefaultBranch:
             "default_branch": "master",
         }
 
-        with patch("agentic_fetch.plugins.github.httpx.AsyncClient") as mock_client_cls:
-            repo_resp = MagicMock()
-            repo_resp.raise_for_status = MagicMock()
-            repo_resp.json.return_value = repo_info
+        repo_resp = MagicMock()
+        repo_resp.raise_for_status = MagicMock()
+        repo_resp.json.return_value = repo_info
 
-            readme_resp = MagicMock()
-            readme_resp.is_success = True
-            readme_resp.text = "# Readme content"
+        readme_resp = MagicMock()
+        readme_resp.is_success = True
+        readme_resp.text = "# Readme content"
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=[repo_resp, readme_resp])
-            mock_client_cls.return_value = mock_client
-
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=[repo_resp, readme_resp])
+        with patch("agentic_fetch.plugins.github.get_client", return_value=mock_client):
             result = await plugin._fetch_repo("owner", "repo", req, "https://github.com/owner/repo")
 
         assert isinstance(result, FetchResponse)
@@ -149,20 +133,16 @@ class TestFetchRepoDefaultBranch:
             "default_branch": "main",
         }
 
-        with patch("agentic_fetch.plugins.github.httpx.AsyncClient") as mock_client_cls:
-            repo_resp = MagicMock()
-            repo_resp.raise_for_status = MagicMock()
-            repo_resp.json.return_value = repo_info
+        repo_resp = MagicMock()
+        repo_resp.raise_for_status = MagicMock()
+        repo_resp.json.return_value = repo_info
 
-            readme_resp = MagicMock()
-            readme_resp.is_success = False
+        readme_resp = MagicMock()
+        readme_resp.is_success = False
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=[repo_resp, readme_resp])
-            mock_client_cls.return_value = mock_client
-
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=[repo_resp, readme_resp])
+        with patch("agentic_fetch.plugins.github.get_client", return_value=mock_client):
             result = await plugin._fetch_repo("owner", "repo", req, "https://github.com/owner/repo")
 
         assert "main" in result.markdown
@@ -258,17 +238,13 @@ class TestRawGitHubUrlHandling:
         plugin = GitHubPlugin()
         req = make_req("https://raw.githubusercontent.com/owner/repo/main/README.md")
 
-        with patch("agentic_fetch.plugins.github.httpx.AsyncClient") as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.text = "# Hello from raw"
-            mock_resp.status_code = 200
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
-
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "# Hello from raw"
+        mock_resp.status_code = 200
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        with patch("agentic_fetch.plugins.github.get_client", return_value=mock_client):
             result = await plugin.fetch(
                 "https://raw.githubusercontent.com/owner/repo/main/README.md", req
             )

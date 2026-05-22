@@ -4,13 +4,18 @@ AI-optimized web search and fetch service for Claude Code skills. Returns clean 
 
 ## Features
 
-- **4-tier fetch strategy**: plugin → httpx → httpx+browser (data: URL) → zendriver full navigation
+- **5-tier fetch strategy**: plugin → httpx → curl_cffi (bot-bypass) → httpx HTML in browser (data: URL) → zendriver full navigation
 - **5 plugins**: Reddit, Medium (via Freedium), GitHub, HackerNews, Wikipedia — no browser needed
-- **Search**: Google · DuckDuckGo · Reddit · GitHub (repos, code, trending) · HackerNews — with date, sort, and engine-specific filters
-- **File cache**: TTL + ETag conditional requests, atomic writes
+- **Search**: Google · DuckDuckGo (lite, no-browser path) · Reddit · GitHub (repos, code, trending) · HackerNews — with date, sort, and engine-specific filters
+- **File cache**: TTL + ETag conditional requests, fully atomic writes, precomputed TOC/symbols, replayed `method_used` on hits
+- **Batch fetch**: `POST /fetch/batch` runs up to 50 URLs concurrently behind a shared semaphore — perfect for indexing
+- **Cross-cache BM25 search**: `POST /cache/search` returns ranked hits from everything fetched so far
+- **Cache lifecycle**: `POST /cache/evict` (drop one URL) and `POST /cache/prune` (drop stale + LRU-trim to a size cap)
 - **TOC navigation**: extract headings with line ranges, fetch targeted sections via `/fetch/lines`
 - **Grep**: regex search within cached markdown, no re-fetch needed
 - **Config-driven**: per-domain strip selectors, strip_lines regexes, proxy URLs, init scripts — no code changes needed
+- **Shared connection pool**: a single `httpx.AsyncClient` per event loop reused across plugins and search backends
+- **Structured logging**: failures in any tier go to `logging` (INFO/WARNING/DEBUG) instead of being silently swallowed
 - **Docker + VNC**: xvfb + x11vnc + noVNC for browser debugging at `http://localhost:6080/vnc.html`
 
 ## Quick Start
@@ -147,6 +152,45 @@ Regex search within cached markdown:
   "ignore_case": false,
   "max_matches": 50
 }
+```
+
+### `POST /fetch/batch`
+
+Fetch up to 50 URLs concurrently. Per-URL failures are isolated — the batch
+still returns 200 with partial results.
+
+```json
+{
+  "urls": ["https://a.com", "https://b.com", "https://c.com"],
+  "max_concurrency": 5,
+  "max_tokens_per_url": 4000,
+  "return_markdown": true
+}
+```
+
+Set `return_markdown: false` for an index-only response (title, TOC, method,
+total_lines) — useful when you just want to know what's worth reading.
+
+### `POST /cache/search`
+
+BM25 search across every cached markdown document in the local cache:
+
+```json
+{"query": "async def event loop", "limit": 10}
+```
+
+### `POST /cache/evict`
+
+Drop a single cached entry by URL. Returns `{"removed": true|false}`.
+
+### `POST /cache/prune`
+
+Evict stale entries (older than `ttl × max_age_factor`) and optionally
+LRU-trim until the cache fits under `max_mb`. Synthesis entries
+(`POST /cache/write`) are never evicted.
+
+```json
+{"max_mb": 200, "max_age_factor": 4.0}
 ```
 
 ### `GET /health`

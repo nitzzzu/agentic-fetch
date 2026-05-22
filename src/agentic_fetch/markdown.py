@@ -23,7 +23,7 @@ def _readability_extract(html: str) -> str | None:
         extracted_text = body.get_text(separator="\n", strip=True)
         # Require enough non-empty lines — guards against JS-heavy pages where
         # httpx fetches only script tags and readability extracts almost nothing
-        meaningful_lines = [l for l in extracted_text.splitlines() if len(l.strip()) > 20]
+        meaningful_lines = [ln for ln in extracted_text.splitlines() if len(ln.strip()) > 20]
         if len(meaningful_lines) < 5:
             return None
         # Also sanity-check against original: if readability extracted less than 10%

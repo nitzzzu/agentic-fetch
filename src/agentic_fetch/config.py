@@ -68,22 +68,32 @@ class SiteConfig:
 
     def init_script_for(self, url: str) -> str | None:
         from urllib.parse import urlparse
-        host = urlparse(url).netloc.lower().lstrip("www.")
+        host = urlparse(url).netloc.lower().removeprefix("www.")
         return (self._domain_cfg(url).get("init_script")
                 or self._init_scripts.get(host))
+
+
+TRACKING_PARAMS = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "fbclid", "gclid", "msclkid", "yclid", "_hsenc", "_hsmi",
+    "mc_cid", "mc_eid", "ref", "ref_src", "ref_url", "source",
+})
 
 
 def normalize_url(url: str) -> str:
     from urllib.parse import urlparse, urlencode, parse_qsl
     u = urlparse(url)
-    TRACKING = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-                "fbclid", "gclid", "ref", "source"}
     clean_query = urlencode([(k, v) for k, v in parse_qsl(u.query)
-                              if k.lower() not in TRACKING])
+                              if k.lower() not in TRACKING_PARAMS])
     return u._replace(fragment="", query=clean_query).geturl()
 
 
 def detect_content_type(url: str, content_type_header: str) -> str:
+    """Classify a response as html / markdown / plain so callers can pick a pipeline.
+
+    Only true markdown (.md / .markdown / text/markdown) is treated as markdown;
+    .txt and .rst use different syntax and would be garbled by html-to-markdown.
+    """
     from pathlib import PurePosixPath
     from urllib.parse import urlparse
     ct = content_type_header.lower()
@@ -92,9 +102,12 @@ def detect_content_type(url: str, content_type_header: str) -> str:
     if "text/markdown" in ct or "text/x-markdown" in ct:
         return "markdown"
     ext = PurePosixPath(urlparse(url).path).suffix.lower()
-    if ext in (".md", ".markdown", ".txt", ".rst"):
+    if ext in (".md", ".markdown"):
         return "markdown"
+    if ext in (".txt", ".rst"):
+        return "plain"
     return "html"
 
 
 settings = Settings()
+site_config = SiteConfig(settings.config_file)

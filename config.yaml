@@ -25,29 +25,19 @@ strip_lines:
   - "^\\s*Scan the QR code"
   - "^\\s*Follow\\s*$"
 
-# Per-domain JS init scripts (run before page JS via CDP)
-init_scripts:
-  wsj.com: |
-    Object.defineProperty(document, 'cookie', { get: () => 'subscriber=true' });
-  ft.com: |
-    window.__FT_BARRIER_DISABLED = true;
-
-# Per-domain overrides
+# Per-domain overrides. The `init_script` key here replaces the deprecated
+# top-level `init_scripts:` map (both still load, but use this single path).
 domains:
-  medium.com:
-    proxy_url: "https://freedium-mirror.cfd/"
-    strip_lines:
-      - "Freedium"
-      - "Ko-fi"
-      - "min read ·"
-      - "^\\s*Sign (up|in)"
-      - "Open in app"
+  wsj.com:
+    init_script: |
+      Object.defineProperty(document, 'cookie', { get: () => 'subscriber=true' });
 
-  towardsdatascience.com:
-    proxy_url: "https://freedium-mirror.cfd/"
+  ft.com:
+    init_script: |
+      window.__FT_BARRIER_DISABLED = true;
 
-  betterprogramming.pub:
-    proxy_url: "https://freedium-mirror.cfd/"
+  # NOTE: Medium-family domains are handled by the `medium` plugin via Freedium.
+  # Putting proxy_url here would never fire — the plugin tier short-circuits first.
 
   digi24.ro:
     strip_selectors:

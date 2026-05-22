@@ -97,6 +97,60 @@ class FetchResponse(BaseModel):
     error: str | None = None
 
 
+class BatchFetchRequest(BaseModel):
+    """Fetch many URLs concurrently with a shared budget.
+
+    ``max_concurrency`` caps simultaneous requests; ``max_tokens_per_url`` is the
+    per-URL paginate cap. ``return_markdown=False`` returns only the metadata
+    summary (title/method/total_lines/toc) — handy for indexing a set of pages
+    cheaply without paying for the full markdown payload over HTTP.
+    """
+    urls: list[str] = Field(..., min_length=1, max_length=50)
+    max_concurrency: int = Field(default=5, ge=1, le=20)
+    max_tokens_per_url: int | None = 4000
+    force_browser: bool = False
+    no_cache: bool = False
+    include_links: bool = True
+    include_images: bool = False
+    return_markdown: bool = True
+
+
+class BatchFetchResult(BaseModel):
+    url: str
+    ok: bool
+    title: str = ""
+    markdown: str = ""
+    method_used: str | None = None
+    cached: bool = False
+    total_lines: int = 0
+    truncated: bool = False
+    next_offset: int | None = None
+    toc: list[TOCEntry] = []
+    error: str | None = None
+
+
+class BatchFetchResponse(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    duration_ms: int
+    results: list[BatchFetchResult]
+
+
+class CacheEvictRequest(BaseModel):
+    url: str
+
+
+class CachePruneRequest(BaseModel):
+    max_mb: float | None = None
+    max_age_factor: float = 4.0
+
+
+class CacheSearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+
 class FetchLinesRequest(BaseModel):
     url: str
     start: int

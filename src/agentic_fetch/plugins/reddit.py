@@ -1,5 +1,3 @@
-import httpx
-import re
 from urllib.parse import urlparse
 from html import unescape
 from datetime import datetime
@@ -7,6 +5,7 @@ from datetime import datetime
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..markdown import paginate
+from ..http_client import get_client
 
 
 class RedditPlugin(FetchPlugin):
@@ -24,10 +23,10 @@ class RedditPlugin(FetchPlugin):
         url = self._normalize_url(url)
         json_url = url.rstrip("/") + ".json"
 
-        async with httpx.AsyncClient(headers=self.HEADERS, follow_redirects=True, timeout=30) as client:
-            resp = await client.get(json_url)
-            resp.raise_for_status()
-            data = resp.json()
+        client = get_client()
+        resp = await client.get(json_url, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
 
         if not isinstance(data, list) or len(data) < 2:
             raise ValueError("Unexpected Reddit API response format")
@@ -80,13 +79,13 @@ class RedditPlugin(FetchPlugin):
     def _format_comments(self, comments: list, op: str, depth: int = 0, limit: int = 200) -> str:
         if not comments:
             return ""
-        out = "---\n\n## Comments\n\n" if depth == 0 else ""
-        count = [0]
+        parts: list[str] = ["---\n\n## Comments\n\n"] if depth == 0 else []
+        count = 0
 
         def recurse(items, d):
-            nonlocal out
+            nonlocal count
             for item in items:
-                if count[0] >= limit:
+                if count >= limit:
                     return
                 if item.get("kind") == "more":
                     continue
@@ -94,20 +93,20 @@ class RedditPlugin(FetchPlugin):
                 body = unescape(data.get("body") or "").strip()
                 if not body or data.get("author") in ("[deleted]", "[removed]"):
                     continue
-                count[0] += 1
+                count += 1
                 author = data.get("author", "?")
                 score = data.get("score", 0)
                 badge = " **[OP]**" if author == op else ""
                 if data.get("distinguished") == "moderator":
                     badge += " **[MOD]**"
                 prefix = "> " * d if d > 0 else ""
-                out_parts = [f"{prefix}**u/{author}**{badge} · {score} pts\n"]
+                parts.append(f"{prefix}**u/{author}**{badge} · {score} pts\n")
                 for line in body.splitlines():
-                    out_parts.append(f"{prefix}{line}\n")
-                out += "".join(out_parts) + "\n"
+                    parts.append(f"{prefix}{line}\n")
+                parts.append("\n")
                 replies = data.get("replies")
                 if isinstance(replies, dict):
                     recurse(replies["data"]["children"], d + 1)
 
         recurse(comments, 0)
-        return out
+        return "".join(parts)

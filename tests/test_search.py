@@ -1,5 +1,4 @@
 """Tests for SearchEngine parsing methods."""
-import pytest
 from agentic_fetch.search import SearchEngine
 
 engine = SearchEngine()

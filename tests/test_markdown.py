@@ -1,5 +1,4 @@
 """Tests for markdown extraction and utility functions."""
-import pytest
 from agentic_fetch.markdown import (
     MarkdownExtractor,
     apply_strip_lines,

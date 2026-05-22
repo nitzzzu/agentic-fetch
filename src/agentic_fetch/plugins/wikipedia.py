@@ -8,6 +8,7 @@ from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..markdown import paginate
 from ..config import settings
+from ..http_client import get_client
 
 # Wikimedia REST API blocks generic browser UAs — requires an app-identifying
 # UA with contact info. Configurable via AF_WIKIPEDIA_USER_AGENT env var.
@@ -52,17 +53,17 @@ class WikipediaPlugin(FetchPlugin):
         action_base = f"https://{lang}.wikipedia.org/w/api.php"
 
         try:
-            async with httpx.AsyncClient(headers=_HEADERS, timeout=20) as c:
-                summary_r = await c.get(f"{api_base}/page/summary/{title}")
-                summary_r.raise_for_status()
-                summary = summary_r.json()
+            c = get_client()
+            summary_r = await c.get(f"{api_base}/page/summary/{title}", headers=_HEADERS, timeout=20)
+            summary_r.raise_for_status()
+            summary = summary_r.json()
 
-                # mobile-sections is deprecated — use MediaWiki Action API instead
-                extract_r = await c.get(action_base, params={
-                    "action": "query", "prop": "extracts",
-                    "titles": title, "format": "json",
-                })
-                extract_data = extract_r.json() if extract_r.is_success else {}
+            # mobile-sections is deprecated — use MediaWiki Action API instead
+            extract_r = await c.get(action_base, params={
+                "action": "query", "prop": "extracts",
+                "titles": title, "format": "json",
+            }, headers=_HEADERS, timeout=20)
+            extract_data = extract_r.json() if extract_r.is_success else {}
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             error_msg = (f"Wikipedia API error {status}: {url}"

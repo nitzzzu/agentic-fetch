@@ -7,6 +7,7 @@ from html import unescape
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..markdown import paginate
+from ..http_client import get_client
 
 _HN_OPTS = ConversionOptions(skip_images=True)
 
@@ -34,10 +35,10 @@ class HackerNewsPlugin(FetchPlugin):
         algolia_url = f"https://hn.algolia.com/api/v1/items/{item_id}"
 
         try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(algolia_url)
-                r.raise_for_status()
-                data = r.json()
+            c = get_client()
+            r = await c.get(algolia_url, timeout=15)
+            r.raise_for_status()
+            data = r.json()
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             error_msg = (f"HN API error {status}: {url}"
@@ -89,25 +90,25 @@ class HackerNewsPlugin(FetchPlugin):
 
     def _format_comments(self, items: list, depth: int = 0, limit: int = 100,
                           base_url: str = "") -> str:
-        out = ""
-        count = [0]
+        parts: list[str] = []
+        count = 0
 
         def recurse(items, d):
-            nonlocal out
+            nonlocal count
             for item in items:
-                if count[0] >= limit:
+                if count >= limit:
                     return
                 if item.get("type") == "comment" and item.get("text"):
-                    count[0] += 1
+                    count += 1
                     prefix = "> " * d if d > 0 else ""
                     author = item.get("author", "?")
                     text = _html_to_text(item["text"], base_url=base_url)
-                    out += f"{prefix}**{author}**\n"
+                    parts.append(f"{prefix}**{author}**\n")
                     for line in text.splitlines():
-                        out += f"{prefix}{line}\n"
-                    out += "\n"
+                        parts.append(f"{prefix}{line}\n")
+                    parts.append("\n")
                     if item.get("children"):
                         recurse(item["children"], d + 1)
 
         recurse(items, 0)
-        return out
+        return "".join(parts)
