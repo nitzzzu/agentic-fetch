@@ -1,6 +1,7 @@
 /plans
 /docs
-.claude
+.claude/*
+!.claude/skills/
 .env
 /profile
 /cache
