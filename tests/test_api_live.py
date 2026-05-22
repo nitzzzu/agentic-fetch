@@ -387,7 +387,7 @@ class TestAiNewsTodayE2E:
                 })
         # Allow at most 1 mismatch (paywalls / redirects can change content)
         assert len(mismatches) <= 1, (
-            f"Too many articles where content didn't match search title:\n"
+            "Too many articles where content didn't match search title:\n"
             + "\n".join(str(m) for m in mismatches)
         )
 

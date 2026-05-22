@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 import fnmatch
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from ..models import FetchResponse
 
 
 class FetchPlugin(ABC):
@@ -14,9 +18,9 @@ class FetchPlugin(ABC):
 
     @classmethod
     def matches(cls, url: str) -> bool:
-        host = urlparse(url).netloc.lstrip("www.")
+        host = urlparse(url).netloc.removeprefix("www.")
         for pattern in cls.domains:
-            p = pattern.lstrip("www.").lstrip("*.")
+            p = pattern.removeprefix("www.").removeprefix("*.")
             if fnmatch.fnmatch(host, p) or host == p or host.endswith("." + p):
                 return True
         return False

@@ -5,7 +5,8 @@ from bs4 import BeautifulSoup
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate, MarkdownExtractor
+from ..markdown import paginate
+from ..http_client import get_client
 
 
 class GitHubPlugin(FetchPlugin):
@@ -55,9 +56,9 @@ class GitHubPlugin(FetchPlugin):
 
     async def _fetch_trending(self, language: str, since: str, req: FetchRequest, url: str) -> FetchResponse:
         trend_url = f"https://github.com/trending/{language}" if language else "https://github.com/trending"
-        async with httpx.AsyncClient(headers=self.TRENDING_HEADERS, timeout=15, follow_redirects=True) as c:
-            r = await c.get(trend_url, params={"since": since})
-            r.raise_for_status()
+        c = get_client()
+        r = await c.get(trend_url, params={"since": since}, headers=self.TRENDING_HEADERS, timeout=15)
+        r.raise_for_status()
 
         soup = BeautifulSoup(r.text, "html.parser")
         repos = []
@@ -112,7 +113,7 @@ class GitHubPlugin(FetchPlugin):
         else:
             md = f"# {title}\n\n"
             md += f"| # | Repository | Description | Lang | Stars | Forks | {period.capitalize()} |\n"
-            md += f"|---|------------|-------------|------|------:|------:|-------|\n"
+            md += "|---|------------|-------------|------|------:|------:|-------|\n"
             for i, r in enumerate(repos, 1):
                 repo_url = f"https://github.com/{r['owner']}/{r['repo']}"
                 desc = r["description"].replace("|", "\\|")[:80] + ("…" if len(r["description"]) > 80 else "")
@@ -125,12 +126,16 @@ class GitHubPlugin(FetchPlugin):
                              truncated=truncated, next_offset=next_offset if truncated else None)
 
     async def _fetch_repo(self, owner, repo, req, url) -> FetchResponse:
-        async with httpx.AsyncClient(headers=self.HEADERS, timeout=15) as c:
-            r = await c.get(f"https://api.github.com/repos/{owner}/{repo}")
-            r.raise_for_status()
-            info = r.json()
-            readme_r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/readme",
-                                   headers={**self.HEADERS, "Accept": "application/vnd.github.raw"})
+        c = get_client()
+        r = await c.get(f"https://api.github.com/repos/{owner}/{repo}",
+                        headers=self.HEADERS, timeout=15)
+        r.raise_for_status()
+        info = r.json()
+        readme_r = await c.get(
+            f"https://api.github.com/repos/{owner}/{repo}/readme",
+            headers={**self.HEADERS, "Accept": "application/vnd.github.raw"},
+            timeout=15,
+        )
 
         md = f"# {info['full_name']}\n\n"
         if info.get("description"):
@@ -153,9 +158,9 @@ class GitHubPlugin(FetchPlugin):
     async def _fetch_file(self, owner, repo, branch, path, req, url) -> FetchResponse:
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
         try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(raw_url)
-                r.raise_for_status()
+            c = get_client()
+            r = await c.get(raw_url, timeout=15)
+            r.raise_for_status()
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             error_msg = f"404 Not Found: {raw_url}" if status == 404 else f"Failed to fetch file: {exc}"
@@ -183,12 +188,16 @@ class GitHubPlugin(FetchPlugin):
                              truncated=truncated, next_offset=next_offset if truncated else None)
 
     async def _fetch_issue(self, owner, repo, number, req, url) -> FetchResponse:
-        async with httpx.AsyncClient(headers=self.HEADERS, timeout=15) as c:
-            r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/issues/{number}")
-            r.raise_for_status()
-            issue = r.json()
-            comments_r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments")
-            comments = comments_r.json() if comments_r.is_success else []
+        c = get_client()
+        r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/issues/{number}",
+                        headers=self.HEADERS, timeout=15)
+        r.raise_for_status()
+        issue = r.json()
+        comments_r = await c.get(
+            f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments",
+            headers=self.HEADERS, timeout=15,
+        )
+        comments = comments_r.json() if comments_r.is_success else []
 
         state_badge = "Open" if issue["state"] == "open" else "Closed"
         md = f"# {issue['title']}\n\n"
@@ -206,10 +215,11 @@ class GitHubPlugin(FetchPlugin):
                              truncated=truncated, next_offset=next_offset if truncated else None)
 
     async def _fetch_pr(self, owner, repo, number, req, url) -> FetchResponse:
-        async with httpx.AsyncClient(headers=self.HEADERS, timeout=15) as c:
-            r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}")
-            r.raise_for_status()
-            pr = r.json()
+        c = get_client()
+        r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}",
+                        headers=self.HEADERS, timeout=15)
+        r.raise_for_status()
+        pr = r.json()
 
         state_badge = "Open" if pr["state"] == "open" else "Merged" if pr.get("merged") else "Closed"
         md = f"# {pr['title']}\n\n"

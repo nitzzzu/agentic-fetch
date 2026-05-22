@@ -7,10 +7,9 @@ Tests for Wikipedia plugin fixes:
 """
 import pytest
 import httpx
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentic_fetch.plugins.wikipedia import WikipediaPlugin
-from agentic_fetch.plugins.base import FetchPlugin
 from agentic_fetch.models import FetchRequest, FetchResponse
 
 
@@ -46,7 +45,7 @@ def make_extract_data():
 
 
 def _mock_client(summary_data, extract_data=None, summary_status=200):
-    """Build an AsyncClient mock that returns given data."""
+    """Build a get_client() mock that returns canned responses for two GETs."""
     summary_resp = MagicMock()
     summary_resp.status_code = summary_status
     if summary_status == 200:
@@ -65,9 +64,7 @@ def _mock_client(summary_data, extract_data=None, summary_status=200):
     extract_resp.is_success = extract_data is not None
     extract_resp.json = MagicMock(return_value=extract_data or {})
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client = MagicMock()
     mock_client.get = AsyncMock(side_effect=[summary_resp, extract_resp])
     return mock_client
 
@@ -83,13 +80,13 @@ class TestUserAgent:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_summary(), make_extract_data())
+        client = _mock_client(make_summary(), make_extract_data())
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             await plugin.fetch(req.url, req)
 
-        # Check the headers passed to AsyncClient constructor
-        _, kwargs = mock_cls.call_args
-        headers = kwargs.get("headers", {})
+        # The plugin sends per-call headers — inspect the first .get() call.
+        first_call = client.get.call_args_list[0]
+        headers = first_call.kwargs.get("headers", {})
         assert "User-Agent" in headers, "User-Agent header must be set"
         ua = headers["User-Agent"]
         assert len(ua) > 10, "User-Agent must be descriptive, not empty"
@@ -101,12 +98,11 @@ class TestUserAgent:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_summary(), make_extract_data())
+        client = _mock_client(make_summary(), make_extract_data())
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             await plugin.fetch(req.url, req)
 
-        _, kwargs = mock_cls.call_args
-        ua = kwargs.get("headers", {}).get("User-Agent", "")
+        ua = client.get.call_args_list[0].kwargs.get("headers", {}).get("User-Agent", "")
         assert "python-httpx" not in ua.lower()
 
 
@@ -121,8 +117,8 @@ class TestErrorHandling:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(None, summary_status=403)
+        client = _mock_client(None, summary_status=403)
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -134,8 +130,8 @@ class TestErrorHandling:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(None, summary_status=500)
+        client = _mock_client(None, summary_status=500)
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -146,13 +142,9 @@ class TestErrorHandling:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
-            mock_cls.return_value = mock_client
-
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=mock_client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -169,8 +161,8 @@ class TestSectionRendering:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_summary(), make_extract_data())
+        client = _mock_client(make_summary(), make_extract_data())
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -183,8 +175,8 @@ class TestSectionRendering:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_summary(), make_extract_data())
+        client = _mock_client(make_summary(), make_extract_data())
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "Design philosophy" in result.markdown
@@ -194,8 +186,8 @@ class TestSectionRendering:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_summary(), make_extract_data())
+        client = _mock_client(make_summary(), make_extract_data())
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "Guido van Rossum" in result.markdown        # from full extract
@@ -207,8 +199,8 @@ class TestSectionRendering:
         plugin = WikipediaPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.wikipedia.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_summary(), extract_data=None)
+        client = _mock_client(make_summary(), extract_data=None)
+        with patch("agentic_fetch.plugins.wikipedia.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)

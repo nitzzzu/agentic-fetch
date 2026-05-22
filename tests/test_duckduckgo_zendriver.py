@@ -7,7 +7,7 @@ Bugs fixed:
 - Parser must handle the main DDG site HTML structure (article[data-testid="result"])
 """
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from agentic_fetch.search import SearchEngine
 from agentic_fetch.models import SearchRequest

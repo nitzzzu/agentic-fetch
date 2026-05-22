@@ -2,36 +2,13 @@ import argparse
 import asyncio
 import json
 import sys
-from pathlib import Path
 import httpx
+
+from ._config import CONFIG_FILE, load_api_url, save_api_url
 
 # Reconfigure stdout to UTF-8 so unicode in titles/snippets never crashes on Windows
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-CONFIG_FILE = Path.home() / ".agentic-fetch"
-DEFAULT_URL = "http://localhost:8000"
-
-
-def load_api_url() -> str:
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text())
-            return data.get("api_url", DEFAULT_URL).rstrip("/")
-        except Exception:
-            pass
-    return DEFAULT_URL
-
-
-def save_api_url(url: str):
-    data = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text())
-        except Exception:
-            pass
-    data["api_url"] = url.rstrip("/")
-    CONFIG_FILE.write_text(json.dumps(data, indent=2))
 
 
 def main():
@@ -62,8 +39,9 @@ Examples:
     parser.add_argument("--api-url", help=f"agentic-fetch service URL (saved to {CONFIG_FILE})")
     parser.add_argument(
         "--engine",
-        choices=["auto", "google", "duckduckgo", "reddit", "github", "hackernews"],
+        choices=["auto", "google", "duckduckgo", "reddit", "github", "hackernews", "cache"],
         default="auto",
+        help="Backend (default: auto = Google → DDG-lite). 'cache' searches local BM25 index.",
     )
     parser.add_argument("--max-results", type=int, default=10)
     parser.add_argument("--json", action="store_true", dest="as_json")

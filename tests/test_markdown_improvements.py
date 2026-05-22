@@ -3,7 +3,6 @@ Tests for markdown extraction improvements inspired by the reddit post:
 - readability-lxml: extract main article content before converting to markdown
 - Cleaner output: boilerplate (nav/footer/sidebar/ads) stripped automatically
 """
-import pytest
 from agentic_fetch.markdown import MarkdownExtractor
 
 

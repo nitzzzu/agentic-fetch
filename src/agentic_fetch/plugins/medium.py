@@ -1,14 +1,13 @@
-import httpx
 import re
 from bs4 import BeautifulSoup
 import html_to_markdown
 from html_to_markdown import ConversionOptions
-from urllib.parse import urlparse
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..markdown import paginate
 from ..config import settings
+from ..http_client import get_client
 
 MEDIUM_DOMAINS = {
     "medium.com", "towardsdatascience.com", "betterprogramming.pub",
@@ -38,14 +37,9 @@ class MediumPlugin(FetchPlugin):
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse:
         freedium_url = FREEDIUM + url
-
-        async with httpx.AsyncClient(
-            headers=self.HEADERS,
-            follow_redirects=True,
-            timeout=30,
-        ) as client:
-            resp = await client.get(freedium_url)
-            resp.raise_for_status()
+        client = get_client()
+        resp = await client.get(freedium_url, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "html.parser")
 

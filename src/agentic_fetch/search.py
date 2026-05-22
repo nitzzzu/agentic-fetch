@@ -1,5 +1,6 @@
 import asyncio
 import json as _json
+import logging
 import os
 import httpx
 from html import unescape
@@ -9,6 +10,9 @@ from bs4 import BeautifulSoup
 
 from .models import SearchRequest, SearchResponse, SearchResult
 from .browser import browser_pool
+from .http_client import get_client
+
+log = logging.getLogger("agentic_fetch.search")
 
 _GITHUB_HEADERS = {
     "Accept": "application/vnd.github.v3+json",
@@ -42,12 +46,14 @@ async def _get_with_retry(
     url: str,
     *,
     params: dict | None = None,
+    headers: dict | None = None,
+    timeout: float = 30.0,
     attempts: int = _RETRY_ATTEMPTS,
     backoff: float = _RETRY_BACKOFF,
 ) -> httpx.Response:
     """GET with automatic retry on 429 Rate Limit responses."""
     for attempt in range(attempts):
-        r = await client.get(url, params=params)
+        r = await client.get(url, params=params, headers=headers, timeout=timeout)
         if r.status_code != 429 or attempt == attempts - 1:
             return r
         retry_after = float(r.headers.get("Retry-After", backoff * (attempt + 1)))
@@ -107,10 +113,64 @@ class SearchEngine:
     # ── DuckDuckGo ────────────────────────────────────────────────────────────
 
     async def _duckduckgo(self, req: SearchRequest) -> SearchResponse:
+        # Try the no-JS Lite endpoint first — pure httpx, no browser tab needed.
+        try:
+            results = await self._ddg_lite(req)
+            if results:
+                return SearchResponse(
+                    query=req.query, engine_used="duckduckgo-lite", results=results
+                )
+        except Exception as exc:
+            log.debug("DDG lite failed, falling back to browser: %s", exc)
+
+        # Fall back to the JS endpoint via the browser pool.
         url = f"https://duckduckgo.com/?q={quote_plus(req.query)}&ia=web"
         html, _, _ = await browser_pool.get_html(url)
         results = self._parse_ddg(html, req.max_results)
         return SearchResponse(query=req.query, engine_used="duckduckgo", results=results)
+
+    async def _ddg_lite(self, req: SearchRequest) -> list[SearchResult]:
+        """Fast browser-free DDG search via the html.duckduckgo.com endpoint."""
+        url = "https://html.duckduckgo.com/html/"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        client = get_client()
+        r = await client.post(url, data={"q": req.query}, headers=headers, timeout=15)
+        r.raise_for_status()
+        return self._parse_ddg_lite(r.text, req.max_results)
+
+    def _parse_ddg_lite(self, html: str, limit: int) -> list[SearchResult]:
+        soup = BeautifulSoup(html, "html.parser")
+        from urllib.parse import urlparse, parse_qs, unquote
+        results: list[SearchResult] = []
+        for result in soup.select("div.result, div.web-result"):
+            a = result.select_one("a.result__a, a.result-link")
+            snippet_el = result.select_one(".result__snippet, .result-snippet")
+            if not a:
+                continue
+            href = a.get("href", "")
+            # DDG wraps target URLs in /l/?uddg=<encoded>; unwrap before returning.
+            if href.startswith("//"):
+                href = "https:" + href
+            if "/l/?uddg=" in href or "duckduckgo.com/l/" in href:
+                qs = parse_qs(urlparse(href).query)
+                if "uddg" in qs:
+                    href = unquote(qs["uddg"][0])
+            if not href.startswith("http"):
+                continue
+            results.append(SearchResult(
+                title=a.get_text(strip=True),
+                url=href,
+                snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
+            ))
+            if len(results) >= limit:
+                break
+        return results
 
     # ── Reddit ────────────────────────────────────────────────────────────────
 
@@ -136,22 +196,22 @@ class SearchEngine:
                 listing_params["t"] = time_filter
             json_url = f"https://www.reddit.com/r/{subreddit}/{listing_sort}.json"
             try:
-                async with httpx.AsyncClient(
-                    headers=_REDDIT_HEADERS, follow_redirects=True, timeout=30
-                ) as c:
-                    r = await _get_with_retry(c, json_url, params=listing_params)
-                    if r.status_code == 429:
-                        return SearchResponse(
-                            query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
-                            error="Reddit rate limit (429). Try again in a few seconds.",
-                        )
-                    if r.headers.get("content-type", "").startswith("text/html"):
-                        return SearchResponse(
-                            query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
-                            error="Reddit blocked the request (returned HTML). Retry shortly.",
-                        )
-                    r.raise_for_status()
-                    data = _decode_json(r)
+                c = get_client()
+                r = await _get_with_retry(
+                    c, json_url, params=listing_params, headers=_REDDIT_HEADERS,
+                )
+                if r.status_code == 429:
+                    return SearchResponse(
+                        query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                        error="Reddit rate limit (429). Try again in a few seconds.",
+                    )
+                if r.headers.get("content-type", "").startswith("text/html"):
+                    return SearchResponse(
+                        query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                        error="Reddit blocked the request (returned HTML). Retry shortly.",
+                    )
+                r.raise_for_status()
+                data = _decode_json(r)
             except httpx.HTTPStatusError as e:
                 return SearchResponse(
                     query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
@@ -213,23 +273,21 @@ class SearchEngine:
                    ) if unsupported else None
 
         try:
-            async with httpx.AsyncClient(
-                headers=_REDDIT_HEADERS, follow_redirects=True, timeout=30
-            ) as c:
-                r = await _get_with_retry(c, search_url, params=params)
-                if r.status_code == 429:
-                    return SearchResponse(
-                        query=req.query, engine_used="reddit", results=[],
-                        error=f"Reddit rate limit (429). Try again in a few seconds.",
-                    )
-                if r.headers.get("content-type", "").startswith("text/html"):
-                    return SearchResponse(
-                        query=req.query, engine_used="reddit", results=[],
-                        error="Reddit blocked the request (returned HTML). "
-                              "The service may be rate-limited; retry shortly.",
-                    )
-                r.raise_for_status()
-                data = _decode_json(r)
+            c = get_client()
+            r = await _get_with_retry(c, search_url, params=params, headers=_REDDIT_HEADERS)
+            if r.status_code == 429:
+                return SearchResponse(
+                    query=req.query, engine_used="reddit", results=[],
+                    error="Reddit rate limit (429). Try again in a few seconds.",
+                )
+            if r.headers.get("content-type", "").startswith("text/html"):
+                return SearchResponse(
+                    query=req.query, engine_used="reddit", results=[],
+                    error="Reddit blocked the request (returned HTML). "
+                          "The service may be rate-limited; retry shortly.",
+                )
+            r.raise_for_status()
+            data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
                 query=req.query, engine_used="reddit", results=[],
@@ -289,16 +347,16 @@ class SearchEngine:
         trend_url = f"https://github.com/trending/{lang}" if lang else "https://github.com/trending"
 
         try:
-            async with httpx.AsyncClient(
-                headers=_TREND_HEADERS, timeout=15, follow_redirects=True
-            ) as c:
-                r = await _get_with_retry(c, trend_url, params={"since": period})
-                if r.status_code == 429:
-                    return SearchResponse(
-                        query=req.query, engine_used="github trending", results=[],
-                        error="GitHub rate limit (429). Set GITHUB_TOKEN for higher limits.",
-                    )
-                r.raise_for_status()
+            c = get_client()
+            r = await _get_with_retry(
+                c, trend_url, params={"since": period}, headers=_TREND_HEADERS, timeout=15,
+            )
+            if r.status_code == 429:
+                return SearchResponse(
+                    query=req.query, engine_used="github trending", results=[],
+                    error="GitHub rate limit (429). Set GITHUB_TOKEN for higher limits.",
+                )
+            r.raise_for_status()
         except httpx.HTTPStatusError as e:
             return SearchResponse(
                 query=req.query, engine_used="github trending", results=[],
@@ -371,21 +429,24 @@ class SearchEngine:
         params: dict = {"q": q, "sort": sort, "order": "desc", "per_page": req.max_results}
 
         try:
-            async with httpx.AsyncClient(headers=headers, timeout=15) as c:
-                r = await _get_with_retry(c, "https://api.github.com/search/repositories", params=params)
-                if r.status_code == 429:
-                    return SearchResponse(
-                        query=req.query, engine_used="github", results=[],
-                        error="GitHub API rate limit (429). Set GITHUB_TOKEN for 5,000 req/hr.",
-                    )
-                if r.status_code == 403:
-                    msg = _decode_json(r).get("message", r.text[:200])
-                    return SearchResponse(
-                        query=req.query, engine_used="github", results=[],
-                        error=f"GitHub API forbidden (403): {msg}. Set GITHUB_TOKEN.",
-                    )
-                r.raise_for_status()
-                data = _decode_json(r)
+            c = get_client()
+            r = await _get_with_retry(
+                c, "https://api.github.com/search/repositories",
+                params=params, headers=headers, timeout=15,
+            )
+            if r.status_code == 429:
+                return SearchResponse(
+                    query=req.query, engine_used="github", results=[],
+                    error="GitHub API rate limit (429). Set GITHUB_TOKEN for 5,000 req/hr.",
+                )
+            if r.status_code == 403:
+                msg = _decode_json(r).get("message", r.text[:200])
+                return SearchResponse(
+                    query=req.query, engine_used="github", results=[],
+                    error=f"GitHub API forbidden (403): {msg}. Set GITHUB_TOKEN.",
+                )
+            r.raise_for_status()
+            data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
                 query=req.query, engine_used="github", results=[],
@@ -421,28 +482,31 @@ class SearchEngine:
         params: dict = {"q": q, "per_page": req.max_results}
 
         try:
-            async with httpx.AsyncClient(headers=headers, timeout=15) as c:
-                r = await _get_with_retry(c, "https://api.github.com/search/code", params=params)
-                if r.status_code == 401:
-                    return SearchResponse(
-                        query=req.query, engine_used="github-code", results=[],
-                        error="GitHub code search requires authentication. "
-                              "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
-                    )
-                if r.status_code == 403:
-                    msg = _decode_json(r).get("message", r.text[:200])
-                    return SearchResponse(
-                        query=req.query, engine_used="github-code", results=[],
-                        error=f"GitHub code search forbidden (403): {msg}. "
-                              "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
-                    )
-                if r.status_code == 429:
-                    return SearchResponse(
-                        query=req.query, engine_used="github-code", results=[],
-                        error="GitHub API rate limit (429). Set GITHUB_TOKEN for 5,000 req/hr.",
-                    )
-                r.raise_for_status()
-                data = _decode_json(r)
+            c = get_client()
+            r = await _get_with_retry(
+                c, "https://api.github.com/search/code",
+                params=params, headers=headers, timeout=15,
+            )
+            if r.status_code == 401:
+                return SearchResponse(
+                    query=req.query, engine_used="github-code", results=[],
+                    error="GitHub code search requires authentication. "
+                          "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
+                )
+            if r.status_code == 403:
+                msg = _decode_json(r).get("message", r.text[:200])
+                return SearchResponse(
+                    query=req.query, engine_used="github-code", results=[],
+                    error=f"GitHub code search forbidden (403): {msg}. "
+                          "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
+                )
+            if r.status_code == 429:
+                return SearchResponse(
+                    query=req.query, engine_used="github-code", results=[],
+                    error="GitHub API rate limit (429). Set GITHUB_TOKEN for 5,000 req/hr.",
+                )
+            r.raise_for_status()
+            data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
                 query=req.query, engine_used="github-code", results=[],
@@ -489,15 +553,17 @@ class SearchEngine:
             params["numericFilters"] = ",".join(numeric_filters)
 
         try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await _get_with_retry(c, "https://hn.algolia.com/api/v1/search", params=params)
-                if r.status_code == 429:
-                    return SearchResponse(
-                        query=req.query, engine_used="hackernews", results=[],
-                        error="HackerNews (Algolia) rate limit (429). Retry in a few seconds.",
-                    )
-                r.raise_for_status()
-                data = _decode_json(r)
+            c = get_client()
+            r = await _get_with_retry(
+                c, "https://hn.algolia.com/api/v1/search", params=params, timeout=15,
+            )
+            if r.status_code == 429:
+                return SearchResponse(
+                    query=req.query, engine_used="hackernews", results=[],
+                    error="HackerNews (Algolia) rate limit (429). Retry in a few seconds.",
+                )
+            r.raise_for_status()
+            data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
                 query=req.query, engine_used="hackernews", results=[],

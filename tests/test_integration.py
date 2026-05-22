@@ -33,7 +33,9 @@ DIGI24_URL = "https://www.digi24.ro"
 async def browser():
     """Start Chrome once for all browser-dependent tests in this module.
     Uses a fresh temp profile dir to avoid lock-file issues from previous sessions."""
-    import asyncio, tempfile, os
+    import asyncio
+    import tempfile
+    import os
     from agentic_fetch import browser as _browser_mod
     # Give each test run a unique profile so no Chrome lock files interfere
     fresh_profile = os.path.join(tempfile.gettempdir(), f"af-test-{os.getpid()}")

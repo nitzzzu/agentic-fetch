@@ -13,7 +13,7 @@ import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentic_fetch.plugins.medium import MediumPlugin
-from agentic_fetch.models import FetchRequest, FetchResponse
+from agentic_fetch.models import FetchRequest
 
 ARTICLE_URL = "https://realz.medium.com/running-android-on-kubernetes-be73b940833f"
 
@@ -69,9 +69,7 @@ def _mock_client(html=FREEDIUM_HTML, status=200):
             )
         )
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client = MagicMock()
     mock_client.get = AsyncMock(return_value=resp)
     return mock_client
 
@@ -87,12 +85,11 @@ class TestFreedriumProxy:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             await plugin.fetch(req.url, req)
 
-        mock_client = mock_cls.return_value.__aenter__.return_value
-        called_url = mock_client.get.call_args[0][0]
+        called_url = client.get.call_args[0][0]
         assert "freedium" in called_url
         assert ARTICLE_URL in called_url
 
@@ -102,8 +99,8 @@ class TestFreedriumProxy:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert result.url == ARTICLE_URL
@@ -120,8 +117,8 @@ class TestMetaExtraction:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert result.title == "Running Android on Kubernetes"
@@ -133,8 +130,8 @@ class TestMetaExtraction:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert result.markdown.startswith("*Author: Realz*")
@@ -146,8 +143,8 @@ class TestMetaExtraction:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(html=html_no_author)
+        client = _mock_client(html=html_no_author)
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "*Author:" not in result.markdown
@@ -164,8 +161,8 @@ class TestContentFiltering:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         for banned in ["Ko-fi", "Sign in", "Sign up", "Open in app", "Free: Yes",
@@ -178,8 +175,8 @@ class TestContentFiltering:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "Kubernetes" in result.markdown
@@ -191,8 +188,8 @@ class TestContentFiltering:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "Architecture" in result.markdown
@@ -209,8 +206,8 @@ class TestLinksAndImages:
         plugin = MediumPlugin()
         req = make_req(include_links=True)
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "waydro.id" in result.markdown
@@ -220,8 +217,8 @@ class TestLinksAndImages:
         plugin = MediumPlugin()
         req = make_req(include_links=False)
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client()
+        client = _mock_client()
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "waydro.id" not in result.markdown
@@ -239,8 +236,8 @@ class TestErrorHandling:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(status=403)
+        client = _mock_client(status=403)
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=client):
             with pytest.raises(httpx.HTTPStatusError):
                 await plugin.fetch(req.url, req)
 
@@ -249,13 +246,9 @@ class TestErrorHandling:
         plugin = MediumPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.medium.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
-            mock_cls.return_value = mock_client
-
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
+        with patch("agentic_fetch.plugins.medium.get_client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 await plugin.fetch(req.url, req)
 

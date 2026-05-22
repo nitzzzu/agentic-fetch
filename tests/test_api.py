@@ -1,6 +1,6 @@
 """Tests for FastAPI endpoints."""
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from agentic_fetch.models import (

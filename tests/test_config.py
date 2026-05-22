@@ -1,7 +1,5 @@
 """Tests for config utilities."""
 import pytest
-import tempfile
-import os
 import yaml
 from agentic_fetch.config import SiteConfig, normalize_url, detect_content_type
 
@@ -119,10 +117,12 @@ class TestDetectContentType:
         assert detect_content_type("https://example.com/README.md", "") == "markdown"
 
     def test_rst_extension(self):
-        assert detect_content_type("https://example.com/doc.rst", "") == "markdown"
+        # RST is not markdown — has different syntax. Pipeline shouldn't conflate them.
+        assert detect_content_type("https://example.com/doc.rst", "") == "plain"
 
     def test_txt_extension(self):
-        assert detect_content_type("https://example.com/notes.txt", "") == "markdown"
+        # Plain text is not markdown — keep them distinct.
+        assert detect_content_type("https://example.com/notes.txt", "") == "plain"
 
     def test_html_extension_fallback(self):
         assert detect_content_type("https://example.com/page.html", "") == "html"

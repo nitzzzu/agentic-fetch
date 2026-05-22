@@ -59,9 +59,7 @@ def _mock_client(story_data, status=200):
         )
     resp.json = MagicMock(return_value=story_data)
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client = MagicMock()
     mock_client.get = AsyncMock(return_value=resp)
     return mock_client
 
@@ -79,8 +77,8 @@ class TestItemId:
         story = make_story()  # has 'id', no 'objectID'
         assert "objectID" not in story
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(story)
+        client = _mock_client(story)
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -92,8 +90,8 @@ class TestItemId:
         plugin = HackerNewsPlugin()
         req = make_req("43574847")
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_story(id=43574847))
+        client = _mock_client(make_story(id=43574847))
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "43574847" in result.markdown
@@ -113,8 +111,8 @@ class TestHtmlDecoding:
             make_comment(text="I&apos;m &quot;amazed&quot; by this &amp; that")
         ])
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(story)
+        client = _mock_client(story)
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "&quot;" not in result.markdown
@@ -130,8 +128,8 @@ class TestHtmlDecoding:
             make_comment(text="<p>See <a href='https://example.com'>this link</a> for details.</p>")
         ])
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(story)
+        client = _mock_client(story)
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "<p>" not in result.markdown
@@ -149,8 +147,8 @@ class TestHtmlDecoding:
             text="<p>Has anyone tried <i>this approach</i>? It&apos;s interesting.</p>"
         )
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(story)
+        client = _mock_client(story)
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "<p>" not in result.markdown
@@ -168,8 +166,8 @@ class TestErrorHandling:
         plugin = HackerNewsPlugin()
         req = make_req("99999999")
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(None, status=404)
+        client = _mock_client(None, status=404)
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -180,13 +178,9 @@ class TestErrorHandling:
         plugin = HackerNewsPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
-            mock_cls.return_value = mock_client
-
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=mock_client):
             result = await plugin.fetch(req.url, req)
 
         assert isinstance(result, FetchResponse)
@@ -210,8 +204,8 @@ class TestGeneral:
         plugin = HackerNewsPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_story())
+        client = _mock_client(make_story())
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "Vitamin A toxicity" in result.markdown
@@ -223,8 +217,8 @@ class TestGeneral:
         plugin = HackerNewsPlugin()
         req = make_req()
 
-        with patch("agentic_fetch.plugins.hackernews.httpx.AsyncClient") as mock_cls:
-            mock_cls.return_value = _mock_client(make_story())
+        client = _mock_client(make_story())
+        with patch("agentic_fetch.plugins.hackernews.get_client", return_value=client):
             result = await plugin.fetch(req.url, req)
 
         assert "example.com/article" in result.markdown

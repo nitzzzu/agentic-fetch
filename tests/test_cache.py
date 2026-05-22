@@ -1,7 +1,7 @@
 """Tests for FetchCache."""
 import time
 import pytest
-from agentic_fetch.cache import FetchCache, TRACKING_PARAMS
+from agentic_fetch.cache import FetchCache
 
 SAMPLE_MD = """# Title
 
@@ -75,7 +75,7 @@ class TestPutAndGet:
         c = FetchCache(cache_dir=str(tmp_path / "cache3"), ttl=1)
         c.put("https://example.com", SAMPLE_MD, "html")
         # Manually expire by setting fetched_at in the past
-        import json, time
+        import json
         key = c.cache_key("https://example.com")
         meta_path = c.cache_dir / f"{key}.meta.json"
         meta = json.loads(meta_path.read_text())
@@ -99,7 +99,7 @@ class TestPutAndGet:
 class TestBumpTtl:
     def test_bump_ttl_refreshes_timestamp(self, cache):
         cache.put("https://example.com", SAMPLE_MD, "html")
-        import json, time
+        import json
         key = cache.cache_key("https://example.com")
         meta_path = cache.cache_dir / f"{key}.meta.json"
         old_ts = json.loads(meta_path.read_text())["fetched_at"]
