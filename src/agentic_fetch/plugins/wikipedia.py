@@ -6,7 +6,6 @@ from urllib.parse import urlparse, unquote
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate
 from ..config import settings
 from ..http_client import get_client
 
@@ -69,12 +68,10 @@ class WikipediaPlugin(FetchPlugin):
             error_msg = (f"Wikipedia API error {status}: {url}"
                          if status else f"Wikipedia API unreachable: {exc}")
             md = f"# {title}\n\n**Error:** {error_msg}\n"
-            md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
             return FetchResponse(
                 url=url, title=title, markdown=md,
                 plugin_used=self.name, method_used="plugin",
                 error=error_msg,
-                truncated=truncated, next_offset=next_offset if truncated else None,
             )
 
         display_title = summary.get("displaytitle", title)
@@ -92,9 +89,7 @@ class WikipediaPlugin(FetchPlugin):
             md += summary.get("extract", "") + "\n\n"
 
         md += f"\n[Wikipedia: {display_title}]({url})"
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(
             url=url, title=display_title, markdown=md,
             plugin_used=self.name, method_used="plugin",
-            truncated=truncated, next_offset=next_offset if truncated else None,
         )

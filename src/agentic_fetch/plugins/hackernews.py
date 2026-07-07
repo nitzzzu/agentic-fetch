@@ -6,7 +6,6 @@ from html import unescape
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate
 from ..http_client import get_client
 
 _HN_OPTS = ConversionOptions(skip_images=True)
@@ -44,24 +43,19 @@ class HackerNewsPlugin(FetchPlugin):
             error_msg = (f"HN API error {status}: {url}"
                          if status else f"HN API unreachable: {exc}")
             md = f"**Error:** {error_msg}\n"
-            md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
             return FetchResponse(
                 url=url, title="", markdown=md,
                 plugin_used=self.name, method_used="plugin",
                 error=error_msg,
-                truncated=truncated, next_offset=next_offset if truncated else None,
             )
 
         md = self._format_story(data, url)
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(
             url=url,
             title=data.get("title", ""),
             markdown=md,
             plugin_used=self.name,
             method_used="plugin",
-            truncated=truncated,
-            next_offset=next_offset if truncated else None,
         )
 
     def _format_story(self, data: dict, url: str) -> str:

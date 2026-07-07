@@ -1,11 +1,11 @@
 import httpx
+import os
 import re
 from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate
 from ..http_client import get_client
 
 
@@ -20,6 +20,17 @@ class GitHubPlugin(FetchPlugin):
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
+
+    @classmethod
+    def _api_headers(cls, accept: str | None = None) -> dict:
+        """API headers with GITHUB_TOKEN auth when available (5,000 req/hr vs 60)."""
+        headers = {**cls.HEADERS}
+        if accept:
+            headers["Accept"] = accept
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("AF_GITHUB_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     RE_TRENDING = re.compile(r'^/trending(/[^/?]+)?$')
     RE_REPO = re.compile(r'^/([^/]+)/([^/]+)/?$')
@@ -120,20 +131,18 @@ class GitHubPlugin(FetchPlugin):
                 md += (f"| {i} | [{r['owner']}/{r['repo']}]({repo_url}) "
                        f"| {desc} | {r['language']} | {r['stars']} | {r['forks']} | ⭐ {r['today']} |\n")
 
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(url=url, title=title, markdown=md,
-                             plugin_used=self.name, method_used="plugin",
-                             truncated=truncated, next_offset=next_offset if truncated else None)
+                             plugin_used=self.name, method_used="plugin")
 
     async def _fetch_repo(self, owner, repo, req, url) -> FetchResponse:
         c = get_client()
         r = await c.get(f"https://api.github.com/repos/{owner}/{repo}",
-                        headers=self.HEADERS, timeout=15)
+                        headers=self._api_headers(), timeout=15)
         r.raise_for_status()
         info = r.json()
         readme_r = await c.get(
             f"https://api.github.com/repos/{owner}/{repo}/readme",
-            headers={**self.HEADERS, "Accept": "application/vnd.github.raw"},
+            headers=self._api_headers("application/vnd.github.raw"),
             timeout=15,
         )
 
@@ -150,10 +159,8 @@ class GitHubPlugin(FetchPlugin):
         if readme_r.is_success:
             md += readme_r.text
 
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(url=url, title=info["full_name"], markdown=md,
-                             plugin_used=self.name, method_used="plugin",
-                             truncated=truncated, next_offset=next_offset if truncated else None)
+                             plugin_used=self.name, method_used="plugin")
 
     async def _fetch_file(self, owner, repo, branch, path, req, url) -> FetchResponse:
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
@@ -165,11 +172,9 @@ class GitHubPlugin(FetchPlugin):
             status = getattr(getattr(exc, "response", None), "status_code", None)
             error_msg = f"404 Not Found: {raw_url}" if status == 404 else f"Failed to fetch file: {exc}"
             md = f"# {path}\n\n**Error:** {error_msg}\n"
-            md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
             return FetchResponse(url=url, title=path, markdown=md,
                                  plugin_used=self.name, method_used="plugin",
-                                 error=error_msg,
-                                 truncated=truncated, next_offset=next_offset if truncated else None)
+                                 error=error_msg)
 
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         lang_map = {"py": "python", "ts": "typescript", "js": "javascript",
@@ -182,20 +187,18 @@ class GitHubPlugin(FetchPlugin):
         else:
             md += r.text
 
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(url=url, title=path, markdown=md,
-                             plugin_used=self.name, method_used="plugin",
-                             truncated=truncated, next_offset=next_offset if truncated else None)
+                             plugin_used=self.name, method_used="plugin")
 
     async def _fetch_issue(self, owner, repo, number, req, url) -> FetchResponse:
         c = get_client()
         r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/issues/{number}",
-                        headers=self.HEADERS, timeout=15)
+                        headers=self._api_headers(), timeout=15)
         r.raise_for_status()
         issue = r.json()
         comments_r = await c.get(
             f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments",
-            headers=self.HEADERS, timeout=15,
+            headers=self._api_headers(), timeout=15,
         )
         comments = comments_r.json() if comments_r.is_success else []
 
@@ -209,15 +212,13 @@ class GitHubPlugin(FetchPlugin):
             for comment in comments:
                 md += f"**{comment['user']['login']}** · {comment['created_at'][:10]}\n\n{comment['body']}\n\n---\n\n"
 
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(url=url, title=issue["title"], markdown=md,
-                             plugin_used=self.name, method_used="plugin",
-                             truncated=truncated, next_offset=next_offset if truncated else None)
+                             plugin_used=self.name, method_used="plugin")
 
     async def _fetch_pr(self, owner, repo, number, req, url) -> FetchResponse:
         c = get_client()
         r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}",
-                        headers=self.HEADERS, timeout=15)
+                        headers=self._api_headers(), timeout=15)
         r.raise_for_status()
         pr = r.json()
 
@@ -229,7 +230,5 @@ class GitHubPlugin(FetchPlugin):
         if pr.get("body"):
             md += pr["body"]
 
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(url=url, title=pr["title"], markdown=md,
-                             plugin_used=self.name, method_used="plugin",
-                             truncated=truncated, next_offset=next_offset if truncated else None)
+                             plugin_used=self.name, method_used="plugin")

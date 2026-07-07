@@ -59,7 +59,7 @@ class TestDuckDuckGoUsesZendriver:
 
         with patch("agentic_fetch.search.browser_pool") as mock_pool:
             mock_pool.get_html = AsyncMock(return_value=(DDG_MAIN_HTML, "https://duckduckgo.com", []))
-            result = await engine._duckduckgo(req)
+            await engine._duckduckgo(req)
 
         mock_pool.get_html.assert_called_once()
 
@@ -137,7 +137,6 @@ class TestParseDDGMain:
 
     def test_result_without_snippet_has_empty_string(self):
         results = engine._parse_ddg(DDG_MAIN_HTML, 10)
-        urls = [r.url for r in results]
         third = next((r for r in results if r.url == "https://third.com/page"), None)
         assert third is not None
         assert third.snippet == ""

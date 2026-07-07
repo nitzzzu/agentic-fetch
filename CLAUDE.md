@@ -36,7 +36,7 @@ docker compose up -d
 
 ## Architecture
 
-The service exposes a FastAPI HTTP API (`/search`, `/fetch`, `/fetch/lines`, `/grep`, `/health`) consumed by Claude Code skills via CLI wrappers (`agentic-search`, `agentic-fetch`).
+The service exposes a FastAPI HTTP API (`/search`, `/fetch`, `/fetch/batch`, `/fetch/lines`, `/grep`, `/cache/{search,write,evict,prune,index,log,health}`, `/health`) consumed by Claude Code skills via CLI wrappers (`agentic-search`, `agentic-fetch`).
 
 ### Fetch Pipeline (4-tier waterfall)
 
@@ -69,11 +69,13 @@ class MySitePlugin(FetchPlugin):
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse | None:
         ...
-        md, truncated, next_offset = paginate(content, req.offset, req.max_tokens)
-        return FetchResponse(url=url, title="...", markdown=md,
-            plugin_used=self.name, method_used="plugin",
-            truncated=truncated, next_offset=next_offset if truncated else None)
+        # Return the FULL markdown — the FetchEngine caches it whole, then
+        # paginates the response. Do NOT paginate inside the plugin.
+        return FetchResponse(url=url, title="...", markdown=full_md,
+            plugin_used=self.name, method_used="plugin")
 ```
+
+Plugin responses with `error` set are returned to the caller but never cached.
 
 Built-in plugins: `reddit`, `medium` (proxies via Freedium), `github`, `hackernews`, `wikipedia`.
 

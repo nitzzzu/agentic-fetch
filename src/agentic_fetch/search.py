@@ -4,7 +4,7 @@ import logging
 import os
 import httpx
 from html import unescape
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
@@ -73,12 +73,21 @@ class SearchEngine:
             return await self._goggames(req)
         if req.engine == "cache":
             return self._cache_search(req)
+        if req.engine == "google" and not browser_pool.is_running:
+            return SearchResponse(
+                query=req.query, engine_used="google", results=[],
+                error="Google search needs the browser pool, which isn't running. "
+                      "Use engine=duckduckgo (browser-free lite endpoint) or restart the service.",
+            )
         if req.engine in ("auto", "google"):
             try:
                 return await self._google(req)
-            except Exception:
+            except Exception as exc:
                 if req.engine == "google":
-                    raise
+                    return SearchResponse(
+                        query=req.query, engine_used="google", results=[],
+                        error=f"Google search failed: {exc}",
+                    )
         return await self._duckduckgo(req)
 
     # ── Google ────────────────────────────────────────────────────────────────
@@ -124,6 +133,12 @@ class SearchEngine:
             log.debug("DDG lite failed, falling back to browser: %s", exc)
 
         # Fall back to the JS endpoint via the browser pool.
+        if not browser_pool.is_running:
+            return SearchResponse(
+                query=req.query, engine_used="duckduckgo", results=[],
+                error="DuckDuckGo lite returned nothing and the browser pool isn't "
+                      "running, so the JS fallback is unavailable.",
+            )
         url = f"https://duckduckgo.com/?q={quote_plus(req.query)}&ia=web"
         html, _, _ = await browser_pool.get_html(url)
         results = self._parse_ddg(html, req.max_results)
@@ -235,7 +250,7 @@ class SearchEngine:
                 author = post.get("author", "")
                 score = post.get("score", 0)
                 num_comments = post.get("num_comments", 0)
-                created = datetime.utcfromtimestamp(post.get("created_utc", 0)).strftime("%Y-%m-%d")
+                created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).strftime("%Y-%m-%d")
                 snippet = (f"**r/{sub}** · u/{author} · {created} "
                            f"· {score:,} pts · {num_comments:,} comments")
                 selftext = post.get("selftext", "")
@@ -311,7 +326,7 @@ class SearchEngine:
             author = post.get("author", "")
             score = post.get("score", 0)
             num_comments = post.get("num_comments", 0)
-            created = datetime.utcfromtimestamp(post.get("created_utc", 0)).strftime("%Y-%m-%d")
+            created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).strftime("%Y-%m-%d")
             snippet = (f"**r/{post_subreddit}** · u/{author} · {created} "
                        f"· {score:,} pts · {num_comments:,} comments")
             selftext = post.get("selftext", "")

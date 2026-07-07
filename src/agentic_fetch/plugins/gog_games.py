@@ -3,7 +3,6 @@ from urllib.parse import urlparse
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate
 
 
 class GogGamesPlugin(FetchPlugin):
@@ -103,14 +102,11 @@ class GogGamesPlugin(FetchPlugin):
             lines.append("")
 
         md = "\n".join(lines)
-        md_chunk, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
 
         return FetchResponse(
             url=final_url,
             title=title,
-            markdown=md_chunk,
+            markdown=md,
             plugin_used=self.name,
             method_used="plugin",
-            truncated=truncated,
-            next_offset=next_offset if truncated else None,
         )

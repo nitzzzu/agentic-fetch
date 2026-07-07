@@ -24,4 +24,8 @@ def get_plugin(url: str) -> type[FetchPlugin] | None:
     return None
 
 
+def plugin_names() -> list[str]:
+    return sorted(p.name for p in _registry)
+
+
 _discover()
