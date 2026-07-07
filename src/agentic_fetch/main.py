@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -54,17 +55,18 @@ async def fetch(req: FetchRequest):
     try:
         result = await fetch_engine.fetch(req)
         if result.markdown and not result.cached:
-            import re as _re
             word_count = len(result.markdown.split())
-            clean_title = _re.sub(r"<[^>]+>", "", result.title or "")
+            clean_title = re.sub(r"<[^>]+>", "", result.title or "")
             fetch_cache.log_fetch(result.url, result.method_used, word_count, clean_title)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Cache-bound endpoints are plain `def` on purpose: FastAPI runs them in its
+# threadpool, so their synchronous file I/O never blocks the event loop.
 @app.post("/fetch/lines")
-async def fetch_lines(req: FetchLinesRequest):
+def fetch_lines(req: FetchLinesRequest):
     result = fetch_cache.read_lines(req.url, req.start, req.end)
     if result is None:
         raise HTTPException(status_code=404,
@@ -73,7 +75,11 @@ async def fetch_lines(req: FetchLinesRequest):
 
 
 @app.post("/grep")
-async def grep(req: GrepRequest):
+def grep(req: GrepRequest):
+    try:
+        re.compile(req.pattern)
+    except re.error as e:
+        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}")
     result = fetch_cache.grep(
         req.url, req.pattern,
         context_lines=req.context_lines,
@@ -96,6 +102,9 @@ async def fetch_batch(req: BatchFetchRequest):
     """
     sem = asyncio.Semaphore(req.max_concurrency)
     started = time.monotonic()
+    # Dedupe while preserving order — duplicate URLs would race each other for
+    # no benefit (same cache entry, double network cost).
+    urls = list(dict.fromkeys(req.urls))
 
     async def fetch_one(url: str) -> BatchFetchResult:
         async with sem:
@@ -120,7 +129,7 @@ async def fetch_batch(req: BatchFetchRequest):
                 log.warning("batch fetch failed for %s: %s", url, exc)
                 return BatchFetchResult(url=url, ok=False, error=str(exc))
 
-    results = await asyncio.gather(*(fetch_one(u) for u in req.urls))
+    results = await asyncio.gather(*(fetch_one(u) for u in urls))
     duration_ms = int((time.monotonic() - started) * 1000)
     succeeded = sum(1 for r in results if r.ok)
     return BatchFetchResponse(
@@ -133,52 +142,60 @@ async def fetch_batch(req: BatchFetchRequest):
 
 
 @app.post("/cache/write")
-async def cache_write(req: CacheWriteRequest):
+def cache_write(req: CacheWriteRequest):
     """File synthesized content into the cache permanently (never expires)."""
     fetch_cache.write(req.url, req.markdown)
     word_count = len(req.markdown.split())
+    first_line = next((ln for ln in req.markdown.splitlines() if ln.strip()), req.url)
     fetch_cache.log_fetch(req.url, "synthesis", word_count,
-                          req.markdown.splitlines()[0].lstrip("# ").strip()[:120])
+                          first_line.lstrip("# ").strip()[:120])
     return {"url": req.url, "word_count": word_count, "status": "filed"}
 
 
 @app.post("/cache/evict")
-async def cache_evict(req: CacheEvictRequest):
+def cache_evict(req: CacheEvictRequest):
     """Delete a single cached entry by URL. Returns whether anything was removed."""
     removed = fetch_cache.evict(req.url)
     return {"url": req.url, "removed": removed}
 
 
 @app.post("/cache/prune")
-async def cache_prune(req: CachePruneRequest):
+def cache_prune(req: CachePruneRequest):
     """Evict stale entries (and optionally LRU-trim) to keep the cache lean."""
     return fetch_cache.prune(max_mb=req.max_mb, max_age_factor=req.max_age_factor)
 
 
 @app.post("/cache/search")
-async def cache_search(req: CacheSearchRequest):
+def cache_search(req: CacheSearchRequest):
     """BM25 search across all cached markdown documents."""
     return fetch_cache.search(req.query, limit=req.limit)
 
 
 @app.get("/cache/index")
-async def cache_index():
+def cache_index():
     """Return a structured index of all cached pages, newest first."""
     return fetch_cache.index()
 
 
 @app.get("/cache/log")
-async def cache_log(limit: int = 50):
+def cache_log(limit: int = 50):
     """Return the last `limit` fetch log entries, newest first."""
     return fetch_cache.get_log(limit=limit)
 
 
 @app.get("/cache/health")
-async def cache_health():
+def cache_health():
     """Lint the cache: counts of fresh / stale / synthesis entries and total size."""
     return fetch_cache.health()
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "browser_running": browser_pool.is_running}
+def health():
+    from .plugins import plugin_names
+    return {
+        "status": "ok",
+        "version": app.version,
+        "browser_running": browser_pool.is_running,
+        "plugins": plugin_names(),
+        "cache": fetch_cache.health(),
+    }

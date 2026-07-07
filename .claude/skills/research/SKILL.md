@@ -180,10 +180,14 @@ There's no `/fetch/diff` yet — for now: `/fetch` with `no_cache=true`, then as
 
 ## Common pitfalls
 
-- `engine=auto` falls back from Google → DDG-lite. If both fail, results will be empty (not raise). Always check `len(results)`.
+- `engine=auto` falls back from Google → DDG-lite. If both fail, results will be empty and the response's `error` field explains why (never a raise). Always check `len(results)` and `.error`.
 - `/fetch/lines` and `/grep` require the URL to already be in cache. If it isn't, you get 404 — run `/fetch` first.
+- An invalid `/grep` regex returns **400** with the compile error — fix the pattern, don't retry.
+- Bad inputs (non-http URL, `max_results` outside 1–50, malformed dates, `end < start`) return **422** with field details.
 - The browser pool has 3 tabs by default. Setting `max_concurrency > 3` is fine for httpx-tier fetches but won't speed up zendriver-tier ones.
-- A `method_used` of `"plugin"` in a result means a fast-path was hit (Reddit, GitHub, HN, Wikipedia, Medium-via-Freedium). These never touch the browser.
+- `/fetch/batch` dedupes repeated URLs, so `total` in the response can be lower than the number you sent.
+- A `method_used` of `"plugin"` in a result means a fast-path was hit (Reddit, GitHub, HN, Wikipedia, Medium-via-Freedium). These never touch the browser. The cache always stores the *full* document even when the response is truncated — paginate with `offset`, or `/grep` the rest.
+- `GET /health` now reports `plugins` and `cache` stats — one call tells you what fast-paths exist and how warm the cache is.
 
 ## When *not* to use this skill
 

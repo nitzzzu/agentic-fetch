@@ -196,8 +196,25 @@ LRU-trim until the cache fits under `max_mb`. Synthesis entries
 ### `GET /health`
 
 ```json
-{"status": "ok", "browser_running": true}
+{
+  "status": "ok",
+  "version": "0.2.0",
+  "browser_running": true,
+  "plugins": ["github", "goggames", "hackernews", "medium", "reddit", "wikipedia"],
+  "cache": {"total_entries": 12, "fresh_entries": 9, "stale_entries": 2,
+            "synthesis_entries": 1, "total_size_kb": 431.5,
+            "oldest_entry": "2026-07-07T09:00:00Z", "newest_entry": "2026-07-07T11:42:00Z"}
+}
 ```
+
+### Error semantics
+
+- Invalid input (bad URL scheme, `max_results` out of 1–50, malformed dates,
+  `end < start`, empty markdown) → **422** with field-level details
+- Invalid `/grep` regex → **400**
+- URL not cached yet (`/fetch/lines`, `/grep`) → **404**
+- Upstream/engine failure → **500**, or a structured `error` field on
+  `/search` responses when a specific backend degrades (e.g. browser pool down)
 
 ## Configuration
 

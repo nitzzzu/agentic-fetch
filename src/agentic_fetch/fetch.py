@@ -1,6 +1,5 @@
 import logging
 import re
-from typing import Literal
 
 
 from .models import FetchRequest, FetchResponse, TOCEntry
@@ -28,9 +27,6 @@ _CHALLENGE_SIGNALS = frozenset({
     "_pxhd",
 })
 
-# Methods that may be stored in the cache, used to replay method_used on hits.
-_MethodLit = Literal["plugin", "httpx", "curl_cffi", "httpx+browser", "zendriver"]
-
 
 class FetchEngine:
     async def fetch(self, req: FetchRequest) -> FetchResponse:
@@ -54,7 +50,7 @@ class FetchEngine:
                     result = await plugin_cls().fetch(url, req)
                     if result is not None:
                         self._cache_result(result)
-                        return result
+                        return self._finalize_plugin_response(result, req)
                 except Exception as exc:
                     log.warning(
                         "plugin %s failed for %s: %s",
@@ -275,8 +271,28 @@ class FetchEngine:
             symbols=meta.get("symbols", []),
         )
 
+    def _finalize_plugin_response(self, result: FetchResponse, req: FetchRequest) -> FetchResponse:
+        """Paginate a plugin's full markdown and enrich it with cache metadata.
+
+        Plugins return the complete document; pagination happens here — after
+        `_cache_result` — so the cache always holds the full text and offset
+        requests / grep / line reads see the whole page.
+        """
+        md_chunk, truncated, next_offset = paginate(result.markdown, req.offset, req.max_tokens)
+        result.markdown = md_chunk
+        result.truncated = truncated
+        result.next_offset = next_offset if truncated else None
+        meta = fetch_cache.metadata(result.url) or {}
+        result.toc = [TOCEntry(**e) for e in meta.get("toc", [])]
+        result.total_lines = meta.get("lines", 0)
+        result.code_blocks = meta.get("code_blocks", {})
+        result.symbols = meta.get("symbols", [])
+        return result
+
     def _cache_result(self, result: FetchResponse) -> None:
-        if result.markdown:
+        # Error responses must not be cached — a transient upstream failure
+        # would otherwise be replayed for the whole TTL.
+        if result.markdown and not result.error:
             fetch_cache.put(
                 result.url,
                 result.markdown,

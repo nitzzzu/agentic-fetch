@@ -46,11 +46,23 @@ def _host(url: str) -> str:
 class BrowserPool:
     _browser: zd.Browser | None = None
     _semaphore: asyncio.Semaphore | None = None
+    _restart_lock: asyncio.Lock | None = None
+    # Bumped on every relaunch so concurrent failures trigger exactly one restart.
+    _generation: int = 0
     # Bound for how long acquire_tab() may wait before raising. Surfaces back-pressure
     # as a real error instead of letting requests queue forever on a stuck browser.
     _acquire_timeout: float = 60.0
 
     async def start(self):
+        # Keep semaphore/lock across relaunches — in-flight holders must pair
+        # acquire/release on the same object.
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(settings.max_browser_tabs)
+        if self._restart_lock is None:
+            self._restart_lock = asyncio.Lock()
+        await self._launch()
+
+    async def _launch(self):
         user_data_dir = str(Path(settings.user_data_dir).resolve())
         browser_args = (
             ["--no-sandbox", "--start-maximized"]
@@ -64,7 +76,6 @@ class BrowserPool:
             browser_args=browser_args,
         )
         self._browser = await zd.start(config)
-        self._semaphore = asyncio.Semaphore(settings.max_browser_tabs)
 
     async def stop(self):
         if self._browser:
@@ -73,21 +84,52 @@ class BrowserPool:
 
     @property
     def is_running(self) -> bool:
-        return self._browser is not None
+        # `stopped` checks the actual Chrome process, so a crashed browser
+        # reports not-running instead of hanging every request.
+        return self._browser is not None and not self._browser.stopped
+
+    async def _restart(self, seen_generation: int, force: bool = False) -> None:
+        """Relaunch Chrome. Serialized: if another coroutine already restarted
+        (generation moved on), or the browser is healthy and force is off, no-op."""
+        async with self._restart_lock:
+            if self._generation != seen_generation:
+                return
+            if not force and self.is_running:
+                return
+            log.warning("browser unavailable — relaunching Chrome")
+            try:
+                if self._browser:
+                    await self._browser.stop()
+            except Exception as exc:
+                log.debug("stopping dead browser failed: %s", exc)
+            self._browser = None
+            await self._launch()
+            self._generation += 1
 
     @asynccontextmanager
     async def acquire_tab(self):
         if self._semaphore is None or self._browser is None:
             raise RuntimeError("BrowserPool not started — call await browser_pool.start() first")
+        sem = self._semaphore
         try:
-            await asyncio.wait_for(self._semaphore.acquire(), timeout=self._acquire_timeout)
+            await asyncio.wait_for(sem.acquire(), timeout=self._acquire_timeout)
         except asyncio.TimeoutError:
             raise RuntimeError(
                 f"Timed out waiting {self._acquire_timeout}s for a browser tab — "
                 f"pool is saturated (max_browser_tabs={settings.max_browser_tabs})"
             ) from None
         try:
-            tab = await self._browser.get("about:blank", new_tab=True)
+            gen = self._generation
+            if not self.is_running:
+                await self._restart(gen)
+                gen = self._generation
+            try:
+                tab = await self._browser.get("about:blank", new_tab=True)
+            except Exception as exc:
+                # Process may be alive but CDP wedged — force one relaunch, retry once.
+                log.warning("opening tab failed (%s) — restarting browser", exc)
+                await self._restart(gen, force=True)
+                tab = await self._browser.get("about:blank", new_tab=True)
             try:
                 yield tab
             finally:
@@ -96,7 +138,7 @@ class BrowserPool:
                 except Exception as exc:
                     log.debug("tab close failed: %s", exc)
         finally:
-            self._semaphore.release()
+            sem.release()
 
     def _make_json_interceptor(self, tab, intercepted: list[dict], ready: asyncio.Event):
         """Build a handler that captures interesting JSON responses for content extraction."""

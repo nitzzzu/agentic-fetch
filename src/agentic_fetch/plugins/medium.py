@@ -5,7 +5,6 @@ from html_to_markdown import ConversionOptions
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate
 from ..config import settings
 from ..http_client import get_client
 
@@ -68,12 +67,9 @@ class MediumPlugin(FetchPlugin):
         if author:
             md = f"*Author: {author}*\n\n" + md
 
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
         return FetchResponse(
             url=url, title=title, markdown=md,
             plugin_used=self.name, method_used="plugin",
-            truncated=truncated,
-            next_offset=next_offset if truncated else None,
         )
 
     def _clean(self, md: str, title: str) -> str:

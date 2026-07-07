@@ -17,6 +17,8 @@ def main():
     parser.add_argument("--no-links", action="store_false", dest="include_links")
     parser.add_argument("--images", action="store_true", dest="include_images")
     parser.add_argument("--browser", action="store_true", dest="force_browser")
+    parser.add_argument("--no-cache", action="store_true", dest="no_cache",
+                        help="Bypass the cache and re-fetch")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()
 
@@ -36,6 +38,7 @@ def main():
                 "include_links": args.include_links,
                 "include_images": args.include_images,
                 "force_browser": args.force_browser,
+                "no_cache": args.no_cache,
             })
             r.raise_for_status()
             data = r.json()

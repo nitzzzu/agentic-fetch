@@ -15,6 +15,7 @@ Skip if the server is not up:
     Tests are auto-skipped when the service is unreachable.
 """
 import pytest
+from datetime import date
 import httpx
 
 BASE_URL = "http://127.0.0.1:8000"
@@ -260,8 +261,6 @@ class TestSearchValidationLive:
 # ---------------------------------------------------------------------------
 # End-to-end: search today's AI news via Google, then fetch each article
 # ---------------------------------------------------------------------------
-
-from datetime import date
 
 TODAY = date.today().strftime("%B %d, %Y")   # e.g. "April 04, 2026"
 AI_NEWS_QUERY = f"AI news {TODAY}"

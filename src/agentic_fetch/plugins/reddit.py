@@ -1,10 +1,9 @@
 from urllib.parse import urlparse
 from html import unescape
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
-from ..markdown import paginate
 from ..http_client import get_client
 
 
@@ -34,8 +33,10 @@ class RedditPlugin(FetchPlugin):
         post = data[0]["data"]["children"][0]["data"]
         comments = data[1]["data"]["children"]
 
+        # Return the FULL markdown — the FetchEngine caches it whole, then
+        # paginates the response. Paginating here would poison the cache with
+        # a truncated chunk.
         md = self._format_post(post) + self._format_comments(comments, post["author"])
-        md, truncated, next_offset = paginate(md, req.offset, req.max_tokens)
 
         return FetchResponse(
             url=url,
@@ -43,8 +44,6 @@ class RedditPlugin(FetchPlugin):
             markdown=md,
             plugin_used=self.name,
             method_used="plugin",
-            truncated=truncated,
-            next_offset=next_offset if truncated else None,
         )
 
     def _normalize_url(self, url: str) -> str:
@@ -59,7 +58,7 @@ class RedditPlugin(FetchPlugin):
         subreddit = post.get("subreddit", "")
         score = f"{post.get('score', 0):,}"
         num_comments = f"{post.get('num_comments', 0):,}"
-        created = datetime.utcfromtimestamp(post.get("created_utc", 0)).strftime("%Y-%m-%d %H:%M UTC")
+        created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         permalink = f"https://reddit.com{post.get('permalink', '')}"
 
         header = f"# {title}\n\n"
