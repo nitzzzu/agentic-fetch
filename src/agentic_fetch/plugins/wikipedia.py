@@ -4,6 +4,8 @@ from html_to_markdown import ConversionOptions
 import re
 from urllib.parse import urlparse, unquote
 
+from typing import Any
+
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..config import settings
@@ -32,7 +34,7 @@ def _section_to_markdown(html: str, base_url: str, include_links: bool) -> str:
         code_block_style="backticks",
     )
     md = html_to_markdown.convert(html, options=opts)["content"] or ""
-    return re.sub(r'\n{3,}', '\n\n', md).strip()
+    return re.sub(r"\n{3,}", "\n\n", md).strip()
 
 
 class WikipediaPlugin(FetchPlugin):
@@ -42,7 +44,7 @@ class WikipediaPlugin(FetchPlugin):
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse | None:
         parsed = urlparse(url)
         lang = parsed.netloc.split(".")[0]
-        m = re.match(r'^/wiki/(.+)$', parsed.path)
+        m = re.match(r"^/wiki/(.+)$", parsed.path)
         if not m:
             return None
         title = unquote(m.group(1))
@@ -53,24 +55,39 @@ class WikipediaPlugin(FetchPlugin):
 
         try:
             c = get_client()
-            summary_r = await c.get(f"{api_base}/page/summary/{title}", headers=_HEADERS, timeout=20)
+            summary_r = await c.get(
+                f"{api_base}/page/summary/{title}", headers=_HEADERS, timeout=20
+            )
             summary_r.raise_for_status()
             summary = summary_r.json()
 
             # mobile-sections is deprecated — use MediaWiki Action API instead
-            extract_r = await c.get(action_base, params={
-                "action": "query", "prop": "extracts",
-                "titles": title, "format": "json",
-            }, headers=_HEADERS, timeout=20)
+            extract_r = await c.get(
+                action_base,
+                params={
+                    "action": "query",
+                    "prop": "extracts",
+                    "titles": title,
+                    "format": "json",
+                },
+                headers=_HEADERS,
+                timeout=20,
+            )
             extract_data = extract_r.json() if extract_r.is_success else {}
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            error_msg = (f"Wikipedia API error {status}: {url}"
-                         if status else f"Wikipedia API unreachable: {exc}")
+            error_msg = (
+                f"Wikipedia API error {status}: {url}"
+                if status
+                else f"Wikipedia API unreachable: {exc}"
+            )
             md = f"# {title}\n\n**Error:** {error_msg}\n"
             return FetchResponse(
-                url=url, title=title, markdown=md,
-                plugin_used=self.name, method_used="plugin",
+                url=url,
+                title=title,
+                markdown=md,
+                plugin_used=self.name,
+                method_used="plugin",
                 error=error_msg,
             )
 
@@ -82,7 +99,8 @@ class WikipediaPlugin(FetchPlugin):
 
         # Full article HTML from Action API
         pages = extract_data.get("query", {}).get("pages", {})
-        full_html = next(iter(pages.values()), {}).get("extract", "") if pages else ""
+        first_page: dict[str, Any] = next(iter(pages.values()), {}) if pages else {}
+        full_html = first_page.get("extract", "") or ""
         if full_html:
             md += _section_to_markdown(full_html, url, req.include_links) + "\n\n"
         else:
@@ -90,6 +108,9 @@ class WikipediaPlugin(FetchPlugin):
 
         md += f"\n[Wikipedia: {display_title}]({url})"
         return FetchResponse(
-            url=url, title=display_title, markdown=md,
-            plugin_used=self.name, method_used="plugin",
+            url=url,
+            title=display_title,
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
         )

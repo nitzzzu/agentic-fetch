@@ -2,6 +2,8 @@ from urllib.parse import urlparse
 from html import unescape
 from datetime import datetime, timezone
 
+from typing import Any
+
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..http_client import get_client
@@ -13,7 +15,7 @@ class RedditPlugin(FetchPlugin):
 
     HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/html, */*",
         "Accept-Language": "en-US,en;q=0.9",
     }
@@ -40,7 +42,7 @@ class RedditPlugin(FetchPlugin):
 
         return FetchResponse(
             url=url,
-            title=post.get("title", ""),
+            title=unescape(post.get("title", "")),
             markdown=md,
             plugin_used=self.name,
             method_used="plugin",
@@ -52,13 +54,15 @@ class RedditPlugin(FetchPlugin):
         parsed = urlparse(url)
         return f"https://www.reddit.com{parsed.path}"
 
-    def _format_post(self, post: dict) -> str:
+    def _format_post(self, post: dict[str, Any]) -> str:
         title = unescape(post.get("title", ""))
         author = post.get("author", "unknown")
         subreddit = post.get("subreddit", "")
         score = f"{post.get('score', 0):,}"
         num_comments = f"{post.get('num_comments', 0):,}"
-        created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        created = datetime.fromtimestamp(
+            post.get("created_utc", 0), tz=timezone.utc
+        ).strftime("%Y-%m-%d %H:%M UTC")
         permalink = f"https://reddit.com{post.get('permalink', '')}"
 
         header = f"# {title}\n\n"
@@ -70,18 +74,22 @@ class RedditPlugin(FetchPlugin):
 
         if post.get("url") and not post.get("is_self"):
             link_url = post["url"]
-            if not link_url.endswith(('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.webp')):
+            if not link_url.endswith(
+                (".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webp")
+            ):
                 header += f"**Link:** {link_url}\n\n"
 
         return header
 
-    def _format_comments(self, comments: list, op: str, depth: int = 0, limit: int = 200) -> str:
+    def _format_comments(
+        self, comments: list[dict[str, Any]], op: str, depth: int = 0, limit: int = 200
+    ) -> str:
         if not comments:
             return ""
         parts: list[str] = ["---\n\n## Comments\n\n"] if depth == 0 else []
         count = 0
 
-        def recurse(items, d):
+        def recurse(items: list[dict[str, Any]], d: int) -> None:
             nonlocal count
             for item in items:
                 if count >= limit:

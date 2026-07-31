@@ -11,7 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="AI-optimized web search",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -36,10 +36,20 @@ Examples:
 """,
     )
     parser.add_argument("query")
-    parser.add_argument("--api-url", help=f"agentic-fetch service URL (saved to {CONFIG_FILE})")
+    parser.add_argument(
+        "--api-url", help=f"agentic-fetch service URL (saved to {CONFIG_FILE})"
+    )
     parser.add_argument(
         "--engine",
-        choices=["auto", "google", "duckduckgo", "reddit", "github", "hackernews", "cache"],
+        choices=[
+            "auto",
+            "google",
+            "duckduckgo",
+            "reddit",
+            "github",
+            "hackernews",
+            "cache",
+        ],
         default="auto",
         help="Backend (default: auto = Google → DDG-lite). 'cache' searches local BM25 index.",
     )
@@ -48,10 +58,18 @@ Examples:
 
     # Date filters
     date_group = parser.add_argument_group("Date filters (Google, GitHub, HackerNews)")
-    date_group.add_argument("--date-from", metavar="YYYY-MM-DD", dest="date_from",
-                            help="Results published after this date")
-    date_group.add_argument("--date-to", metavar="YYYY-MM-DD", dest="date_to",
-                            help="Results published before this date")
+    date_group.add_argument(
+        "--date-from",
+        metavar="YYYY-MM-DD",
+        dest="date_from",
+        help="Results published after this date",
+    )
+    date_group.add_argument(
+        "--date-to",
+        metavar="YYYY-MM-DD",
+        dest="date_to",
+        help="Results published before this date",
+    )
     date_group.add_argument(
         "--date-preset",
         dest="date_preset",
@@ -63,7 +81,16 @@ Examples:
     reddit_group = parser.add_argument_group("Reddit filters (--engine reddit)")
     reddit_group.add_argument(
         "--sort",
-        choices=["relevance", "hot", "top", "new", "comments", "stars", "forks", "updated"],
+        choices=[
+            "relevance",
+            "hot",
+            "top",
+            "new",
+            "comments",
+            "stars",
+            "forks",
+            "updated",
+        ],
         help="Sort order. Reddit: relevance|hot|top|new|comments. GitHub repos: stars|forks|updated",
     )
     reddit_group.add_argument(
@@ -90,10 +117,15 @@ Examples:
 
     # HackerNews filters
     hn_group = parser.add_argument_group("HackerNews filters (--engine hackernews)")
-    hn_group.add_argument("--min-points", type=int, dest="min_points",
-                          help="Minimum points threshold")
-    hn_group.add_argument("--min-comments", type=int, dest="min_comments",
-                          help="Minimum comments threshold")
+    hn_group.add_argument(
+        "--min-points", type=int, dest="min_points", help="Minimum points threshold"
+    )
+    hn_group.add_argument(
+        "--min-comments",
+        type=int,
+        dest="min_comments",
+        help="Minimum comments threshold",
+    )
     hn_group.add_argument(
         "--story-type",
         dest="story_type",
@@ -109,7 +141,7 @@ Examples:
     else:
         base_url = load_api_url()
 
-    async def run():
+    async def run() -> None:
         # Build payload, omitting None values for a clean request
         payload = {
             "query": args.query,
@@ -154,5 +186,7 @@ Examples:
     try:
         asyncio.run(run())
     except httpx.ConnectError:
-        print(f"Error: agentic-fetch service not running at {base_url}.", file=sys.stderr)
+        print(
+            f"Error: agentic-fetch service not running at {base_url}.", file=sys.stderr
+        )
         sys.exit(1)

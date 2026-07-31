@@ -4,6 +4,8 @@ from html_to_markdown import ConversionOptions
 import re
 from html import unescape
 
+from typing import Any
+
 from .base import FetchPlugin
 from ..models import FetchRequest, FetchResponse
 from ..http_client import get_client
@@ -23,7 +25,7 @@ class HackerNewsPlugin(FetchPlugin):
     name = "hackernews"
     domains = ["news.ycombinator.com"]
 
-    RE_ITEM = re.compile(r'[?&]id=(\d+)')
+    RE_ITEM = re.compile(r"[?&]id=(\d+)")
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse | None:
         m = self.RE_ITEM.search(url)
@@ -40,12 +42,18 @@ class HackerNewsPlugin(FetchPlugin):
             data = r.json()
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            error_msg = (f"HN API error {status}: {url}"
-                         if status else f"HN API unreachable: {exc}")
+            error_msg = (
+                f"HN API error {status}: {url}"
+                if status
+                else f"HN API unreachable: {exc}"
+            )
             md = f"**Error:** {error_msg}\n"
             return FetchResponse(
-                url=url, title="", markdown=md,
-                plugin_used=self.name, method_used="plugin",
+                url=url,
+                title="",
+                markdown=md,
+                plugin_used=self.name,
+                method_used="plugin",
                 error=error_msg,
             )
 
@@ -58,7 +66,7 @@ class HackerNewsPlugin(FetchPlugin):
             method_used="plugin",
         )
 
-    def _format_story(self, data: dict, url: str) -> str:
+    def _format_story(self, data: dict[str, Any], url: str) -> str:
         title = data.get("title", "")
         author = data.get("author", "")
         points = data.get("points") or 0
@@ -82,12 +90,17 @@ class HackerNewsPlugin(FetchPlugin):
 
         return md
 
-    def _format_comments(self, items: list, depth: int = 0, limit: int = 100,
-                          base_url: str = "") -> str:
+    def _format_comments(
+        self,
+        items: list[dict[str, Any]],
+        depth: int = 0,
+        limit: int = 100,
+        base_url: str = "",
+    ) -> str:
         parts: list[str] = []
         count = 0
 
-        def recurse(items, d):
+        def recurse(items: list[dict[str, Any]], d: int) -> None:
             nonlocal count
             for item in items:
                 if count >= limit:

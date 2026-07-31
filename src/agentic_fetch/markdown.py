@@ -1,4 +1,6 @@
 import re
+from collections.abc import Sequence
+from typing import TypedDict
 from urllib.parse import urljoin, urlparse
 import html_to_markdown
 from html_to_markdown import ConversionOptions
@@ -15,6 +17,7 @@ def _readability_extract(html: str) -> str | None:
     """
     try:
         from readability import Document
+
         doc = Document(html)
         summary = doc.summary()
         # Readability returns a full HTML doc; unwrap to just the body content
@@ -23,7 +26,9 @@ def _readability_extract(html: str) -> str | None:
         extracted_text = body.get_text(separator="\n", strip=True)
         # Require enough non-empty lines — guards against JS-heavy pages where
         # httpx fetches only script tags and readability extracts almost nothing
-        meaningful_lines = [ln for ln in extracted_text.splitlines() if len(ln.strip()) > 20]
+        meaningful_lines = [
+            ln for ln in extracted_text.splitlines() if len(ln.strip()) > 20
+        ]
         if len(meaningful_lines) < 5:
             return None
         # Also sanity-check against original: if readability extracted less than 10%
@@ -42,7 +47,7 @@ def _absolutize_links(html: str, base_url: str) -> str:
     for tag in soup.find_all(True):
         for attr in ("href", "src"):
             val = tag.get(attr)
-            if val and not urlparse(val).scheme:
+            if isinstance(val, str) and val and not urlparse(val).scheme:
                 tag[attr] = urljoin(base_url, val)
     return str(soup)
 
@@ -61,7 +66,7 @@ class MarkdownExtractor:
     def to_markdown(
         self,
         selector: str | None = None,
-        strip_selectors: list[str] = (),
+        strip_selectors: Sequence[str] = (),
         include_links: bool = True,
         include_images: bool = False,
     ) -> str:
@@ -74,9 +79,9 @@ class MarkdownExtractor:
 
         root: Tag = self.soup
         if selector:
-            el = self.soup.select_one(selector)
-            if el:
-                root = el
+            sel_el = self.soup.select_one(selector)
+            if sel_el:
+                root = sel_el
         else:
             # Use readability to extract main content and strip boilerplate
             # (nav, footer, sidebar, ads) — inspired by python-readability workflow
@@ -84,7 +89,9 @@ class MarkdownExtractor:
             if clean_html:
                 root = BeautifulSoup(clean_html, "html.parser")
 
-        html_str = _absolutize_links(str(root), self.base_url) if self.base_url else str(root)
+        html_str = (
+            _absolutize_links(str(root), self.base_url) if self.base_url else str(root)
+        )
 
         strip_tags: set[str] = set()
         if not include_links:
@@ -98,7 +105,7 @@ class MarkdownExtractor:
             strip_tags=strip_tags or None,
         )
         md = html_to_markdown.convert(html_str, options=opts)["content"] or ""
-        md = re.sub(r'\n{3,}', '\n\n', md)
+        md = re.sub(r"\n{3,}", "\n\n", md)
         return md.strip()
 
 
@@ -110,8 +117,7 @@ def apply_strip_lines(markdown: str, patterns: list[str]) -> str:
         return markdown
     lines = markdown.splitlines()
     return "\n".join(
-        line for line in lines
-        if not any(rx.search(line) for rx in compiled)
+        line for line in lines if not any(rx.search(line) for rx in compiled)
     )
 
 
@@ -123,17 +129,30 @@ def _valid_re(pattern: str) -> bool:
         return False
 
 
-HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)')
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)")
 
 
-def extract_toc(markdown: str) -> list[dict]:
+class TocEntry(TypedDict):
+    level: int
+    title: str
+    start_line: int
+    end_line: int
+
+
+def extract_toc(markdown: str) -> list[TocEntry]:
     lines = markdown.splitlines()
-    toc = []
+    toc: list[TocEntry] = []
     for i, line in enumerate(lines, start=1):
         m = HEADING_RE.match(line)
         if m:
-            toc.append({"level": len(m.group(1)), "title": m.group(2).strip(),
-                        "start_line": i, "end_line": len(lines)})
+            toc.append(
+                {
+                    "level": len(m.group(1)),
+                    "title": m.group(2).strip(),
+                    "start_line": i,
+                    "end_line": len(lines),
+                }
+            )
     for i in range(len(toc) - 1):
         toc[i]["end_line"] = toc[i + 1]["start_line"] - 1
     return toc
@@ -144,11 +163,11 @@ def read_lines(markdown: str, start: int, end: int) -> str:
     total = len(lines)
     start = max(1, start)
     end = min(total, end)
-    return "\n".join(f"{i:4}  {lines[i-1]}" for i in range(start, end + 1))
+    return "\n".join(f"{i:4}  {lines[i - 1]}" for i in range(start, end + 1))
 
 
-CODE_BLOCK_RE = re.compile(r'(?m)^```([a-zA-Z0-9_+.-]*)')
-SYMBOL_RE = re.compile(r'`([A-Za-z_][A-Za-z0-9_]{1,50})`')
+CODE_BLOCK_RE = re.compile(r"(?m)^```([a-zA-Z0-9_+.-]*)")
+SYMBOL_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{1,50})`")
 
 
 def count_code_blocks(markdown: str) -> dict[str, int]:
@@ -195,9 +214,12 @@ def grep_markdown(
     truncated = len(match_idx) > max_matches
     shown = match_idx[:max_matches]
 
-    out = [f"{len(match_idx)} match{'es' if len(match_idx) != 1 else ''} "
-           f"for {pattern!r} in {total} lines"
-           + (f" (showing first {max_matches})" if truncated else "") + "\n"]
+    out = [
+        f"{len(match_idx)} match{'es' if len(match_idx) != 1 else ''} "
+        f"for {pattern!r} in {total} lines"
+        + (f" (showing first {max_matches})" if truncated else "")
+        + "\n"
+    ]
 
     prev_end = -1
     for idx in shown:
@@ -208,11 +230,13 @@ def grep_markdown(
         print_from = max(start, prev_end + 1)
         for i in range(print_from, end + 1):
             marker = "*" if i == idx else " "
-            out.append(f"{i+1:4}{marker} {lines[i]}")
+            out.append(f"{i + 1:4}{marker} {lines[i]}")
         prev_end = end
 
     if truncated:
-        out.append(f"--\n[{len(match_idx) - max_matches} more matches — narrow pattern or use /fetch/lines]")
+        out.append(
+            f"--\n[{len(match_idx) - max_matches} more matches — narrow pattern or use /fetch/lines]"
+        )
 
     return "\n".join(out) + "\n"
 
@@ -229,7 +253,7 @@ def paginate(text: str, offset: int, max_tokens: int | None) -> tuple[str, bool,
         return text[start:], False, len(text)
 
     chunk = text[start:end]
-    last_nl = chunk.rfind('\n')
+    last_nl = chunk.rfind("\n")
     if last_nl > char_limit // 2:
         chunk = chunk[:last_nl]
         end = start + last_nl

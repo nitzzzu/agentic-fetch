@@ -1,8 +1,10 @@
 import logging
 import re
+from collections.abc import Sequence
+from typing import Any
 
 
-from .models import FetchRequest, FetchResponse, TOCEntry
+from .models import FetchMethod, FetchRequest, FetchResponse, TOCEntry
 from .browser import browser_pool
 from .markdown import MarkdownExtractor, paginate, apply_strip_lines
 from .config import settings, site_config, detect_content_type
@@ -14,18 +16,20 @@ log = logging.getLogger("agentic_fetch.fetch")
 
 # Substring-in-string check on the first 5 KB of HTML. Kept as a frozenset for
 # clarity; size is tiny so a regex would not win.
-_CHALLENGE_SIGNALS = frozenset({
-    "just a moment",            # Cloudflare
-    "cf-browser-verification",
-    "cf_chl_opt",
-    "challenge-platform",
-    "aws-waf-token",            # AWS WAF
-    "x-amz-waf-token",
-    "__ddg",                    # DataDome
-    "datadome",
-    "px-captcha",               # PerimeterX
-    "_pxhd",
-})
+_CHALLENGE_SIGNALS = frozenset(
+    {
+        "just a moment",  # Cloudflare
+        "cf-browser-verification",
+        "cf_chl_opt",
+        "challenge-platform",
+        "aws-waf-token",  # AWS WAF
+        "x-amz-waf-token",
+        "__ddg",  # DataDome
+        "datadome",
+        "px-captcha",  # PerimeterX
+        "_pxhd",
+    }
+)
 
 
 class FetchEngine:
@@ -54,7 +58,9 @@ class FetchEngine:
                 except Exception as exc:
                     log.warning(
                         "plugin %s failed for %s: %s",
-                        getattr(plugin_cls, "__name__", "plugin"), url, exc,
+                        getattr(plugin_cls, "__name__", "plugin"),
+                        url,
+                        exc,
                     )
 
         # Tier 2: httpx fast path
@@ -63,27 +69,43 @@ class FetchEngine:
         if not req.force_browser:
             etag = fetch_cache.get_etag(url)
             try:
-                html_from_httpx, final_url_from_httpx, resp_etag, content_type_header = \
-                    await self._httpx_fetch(fetch_url, etag=etag)
+                (
+                    html_from_httpx,
+                    final_url_from_httpx,
+                    resp_etag,
+                    content_type_header,
+                ) = await self._httpx_fetch(fetch_url, etag=etag)
                 if html_from_httpx is None:
                     fetch_cache.bump_ttl(url)
                     cached = fetch_cache.get(url)
                     if cached:
                         return self._response_from_cache(cached, req)
-                content_type = detect_content_type(fetch_url, content_type_header)
-                if content_type in ("markdown", "plain"):
-                    md = apply_strip_lines(html_from_httpx, site_config.strip_lines_for(url))
-                    fetch_cache.put(url, md, content_type, etag=resp_etag, method="httpx")
-                    return self._build_from_md(md, url, "httpx", req=req)
-                if self._is_challenge_page(html_from_httpx):
-                    html_from_httpx = None  # discard — let curl_cffi retry
-                elif not self._needs_js(html_from_httpx):
-                    strip_sels = site_config.selectors_for(final_url_from_httpx)
-                    strip_lines = site_config.strip_lines_for(url)
-                    return self._build_response(
-                        html_from_httpx, final_url_from_httpx, req, "httpx",
-                        strip_sels, strip_lines, etag=resp_etag,
-                    )
+                else:
+                    content_type = detect_content_type(fetch_url, content_type_header)
+                    if content_type in ("markdown", "plain"):
+                        md = apply_strip_lines(
+                            html_from_httpx, site_config.strip_lines_for(url)
+                        )
+                        fetch_cache.put(
+                            url, md, content_type, etag=resp_etag, method="httpx"
+                        )
+                        return self._build_from_md(md, url, "httpx", req=req)
+                    if self._is_challenge_page(html_from_httpx):
+                        html_from_httpx = None  # discard — let curl_cffi retry
+                    elif not self._needs_js(html_from_httpx):
+                        strip_sels = site_config.selectors_for(
+                            final_url_from_httpx or url
+                        )
+                        strip_lines = site_config.strip_lines_for(url)
+                        return self._build_response(
+                            html_from_httpx,
+                            final_url_from_httpx or url,
+                            req,
+                            "httpx",
+                            strip_sels,
+                            strip_lines,
+                            etag=resp_etag,
+                        )
             except Exception as exc:
                 log.debug("httpx tier failed for %s: %s", url, exc)
 
@@ -97,8 +119,12 @@ class FetchEngine:
                         strip_sels = site_config.selectors_for(curl_final_url)
                         strip_lines = site_config.strip_lines_for(url)
                         return self._build_response(
-                            curl_html, curl_final_url, req, "curl_cffi",
-                            strip_sels, strip_lines,
+                            curl_html,
+                            curl_final_url,
+                            req,
+                            "curl_cffi",
+                            strip_sels,
+                            strip_lines,
                         )
                     # needs JS — pass curl_cffi HTML to the browser tier (better than nothing)
                     html_from_httpx = curl_html
@@ -116,17 +142,24 @@ class FetchEngine:
                     if md and len(md) > 200:
                         fetch_cache.put(req.url, md, "html", method="httpx+browser")
                         return self._build_from_md(
-                            md, req.url, "httpx+browser",
-                            title=intercepted_json[0].get("title", ""), req=req,
+                            md,
+                            req.url,
+                            "httpx+browser",
+                            title=intercepted_json[0].get("title", ""),
+                            req=req,
                         )
-                return self._build_response(html, req.url, req, "httpx+browser", strip_sels)
+                return self._build_response(
+                    html, req.url, req, "httpx+browser", strip_sels
+                )
             except Exception as exc:
                 log.debug("httpx+browser tier failed for %s: %s", url, exc)
 
         # Tier 4: zendriver
         if not browser_pool.is_running:
             return FetchResponse(
-                url=url, title="", markdown="",
+                url=url,
+                title="",
+                markdown="",
                 method_used="httpx",
                 error="All non-browser tiers failed and the browser pool isn't running.",
             )
@@ -138,8 +171,11 @@ class FetchEngine:
             if md and len(md) > 200:
                 fetch_cache.put(final_url, md, "html", method="zendriver")
                 return self._build_from_md(
-                    md, final_url, "zendriver",
-                    title=intercepted_json[0].get("title", ""), req=req,
+                    md,
+                    final_url,
+                    "zendriver",
+                    title=intercepted_json[0].get("title", ""),
+                    req=req,
                 )
 
         return self._build_response(html, final_url, req, "zendriver", strip_sels)
@@ -169,6 +205,7 @@ class FetchEngine:
 
     def _needs_js(self, html: str) -> bool:
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
@@ -207,6 +244,7 @@ class FetchEngine:
     async def _curl_cffi_fetch(self, url: str) -> tuple[str, str] | None:
         try:
             from curl_cffi.requests import AsyncSession
+
             async with AsyncSession(impersonate="chrome") as s:
                 r = await s.get(
                     url,
@@ -221,12 +259,20 @@ class FetchEngine:
             pass
         return None
 
-    def _json_to_markdown(self, data: dict, req: FetchRequest) -> str:
-        for key in ("content", "body", "article", "text", "html", "description", "selftext"):
+    def _json_to_markdown(self, data: dict[str, Any], req: FetchRequest) -> str:
+        for key in (
+            "content",
+            "body",
+            "article",
+            "text",
+            "html",
+            "description",
+            "selftext",
+        ):
             value = data.get(key)
             if not isinstance(value, str) or len(value) < 100:
                 continue
-            if re.search(r'<[a-z][^>]*>', value, re.I):
+            if re.search(r"<[a-z][^>]*>", value, re.I):
                 ext = MarkdownExtractor(value)
                 return ext.to_markdown(
                     include_links=req.include_links,
@@ -236,8 +282,14 @@ class FetchEngine:
         return ""
 
     def _build_response(
-        self, html, url, req, method, strip_sels,
-        strip_lines=(), etag=""
+        self,
+        html: str,
+        url: str,
+        req: FetchRequest,
+        method: FetchMethod,
+        strip_sels: Sequence[str],
+        strip_lines: Sequence[str] = (),
+        etag: str = "",
     ) -> FetchResponse:
         ext = MarkdownExtractor(html, base_url=url)
         md = ext.to_markdown(
@@ -251,7 +303,12 @@ class FetchEngine:
         return self._build_from_md(md, url, method, title=ext.title, req=req)
 
     def _build_from_md(
-        self, md, url, method, title="", req=None
+        self,
+        md: str,
+        url: str,
+        method: FetchMethod,
+        title: str = "",
+        req: FetchRequest | None = None,
     ) -> FetchResponse:
         offset = req.offset if req else 0
         max_tokens = req.max_tokens if req else None
@@ -271,14 +328,18 @@ class FetchEngine:
             symbols=meta.get("symbols", []),
         )
 
-    def _finalize_plugin_response(self, result: FetchResponse, req: FetchRequest) -> FetchResponse:
+    def _finalize_plugin_response(
+        self, result: FetchResponse, req: FetchRequest
+    ) -> FetchResponse:
         """Paginate a plugin's full markdown and enrich it with cache metadata.
 
         Plugins return the complete document; pagination happens here — after
         `_cache_result` — so the cache always holds the full text and offset
         requests / grep / line reads see the whole page.
         """
-        md_chunk, truncated, next_offset = paginate(result.markdown, req.offset, req.max_tokens)
+        md_chunk, truncated, next_offset = paginate(
+            result.markdown, req.offset, req.max_tokens
+        )
         result.markdown = md_chunk
         result.truncated = truncated
         result.next_offset = next_offset if truncated else None

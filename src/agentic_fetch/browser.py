@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 import zendriver as zd
 from .config import settings, site_config
@@ -10,10 +12,21 @@ from .config import settings, site_config
 log = logging.getLogger("agentic_fetch.browser")
 
 BLOCKED_PATTERNS = [
-    "*googlesyndication.com*", "*doubleclick.net*", "*googleadservices.com*",
-    "*adnxs.com*", "*moatads.com*", "*amazon-adsystem.com*",
-    "*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.svg",
-    "*.woff", "*.woff2", "*.ttf",
+    "*googlesyndication.com*",
+    "*doubleclick.net*",
+    "*googleadservices.com*",
+    "*adnxs.com*",
+    "*moatads.com*",
+    "*amazon-adsystem.com*",
+    "*.jpg",
+    "*.jpeg",
+    "*.png",
+    "*.gif",
+    "*.webp",
+    "*.svg",
+    "*.woff",
+    "*.woff2",
+    "*.ttf",
 ]
 
 COOKIE_DISMISS_JS = """
@@ -36,7 +49,15 @@ COOKIE_DISMISS_JS = """
 })();
 """
 
-CONTENT_JSON_KEYS = {"content", "body", "text", "article", "description", "selftext", "html"}
+CONTENT_JSON_KEYS = {
+    "content",
+    "body",
+    "text",
+    "article",
+    "description",
+    "selftext",
+    "html",
+}
 
 
 def _host(url: str) -> str:
@@ -53,7 +74,7 @@ class BrowserPool:
     # as a real error instead of letting requests queue forever on a stuck browser.
     _acquire_timeout: float = 60.0
 
-    async def start(self):
+    async def start(self) -> None:
         # Keep semaphore/lock across relaunches — in-flight holders must pair
         # acquire/release on the same object.
         if self._semaphore is None:
@@ -62,11 +83,10 @@ class BrowserPool:
             self._restart_lock = asyncio.Lock()
         await self._launch()
 
-    async def _launch(self):
+    async def _launch(self) -> None:
         user_data_dir = str(Path(settings.user_data_dir).resolve())
         browser_args = (
-            ["--no-sandbox", "--start-maximized"]
-            if settings.container else []
+            ["--no-sandbox", "--start-maximized"] if settings.container else []
         )
         config = zd.Config(
             headless=settings.headless,
@@ -77,7 +97,7 @@ class BrowserPool:
         )
         self._browser = await zd.start(config)
 
-    async def stop(self):
+    async def stop(self) -> None:
         if self._browser:
             await self._browser.stop()
             self._browser = None
@@ -91,6 +111,7 @@ class BrowserPool:
     async def _restart(self, seen_generation: int, force: bool = False) -> None:
         """Relaunch Chrome. Serialized: if another coroutine already restarted
         (generation moved on), or the browser is healthy and force is off, no-op."""
+        assert self._restart_lock is not None, "BrowserPool not started"
         async with self._restart_lock:
             if self._generation != seen_generation:
                 return
@@ -107,9 +128,11 @@ class BrowserPool:
             self._generation += 1
 
     @asynccontextmanager
-    async def acquire_tab(self):
+    async def acquire_tab(self) -> AsyncIterator[zd.Tab]:
         if self._semaphore is None or self._browser is None:
-            raise RuntimeError("BrowserPool not started — call await browser_pool.start() first")
+            raise RuntimeError(
+                "BrowserPool not started — call await browser_pool.start() first"
+            )
         sem = self._semaphore
         try:
             await asyncio.wait_for(sem.acquire(), timeout=self._acquire_timeout)
@@ -123,12 +146,14 @@ class BrowserPool:
             if not self.is_running:
                 await self._restart(gen)
                 gen = self._generation
+            assert self._browser is not None
             try:
                 tab = await self._browser.get("about:blank", new_tab=True)
             except Exception as exc:
                 # Process may be alive but CDP wedged — force one relaunch, retry once.
                 log.warning("opening tab failed (%s) — restarting browser", exc)
                 await self._restart(gen, force=True)
+                assert self._browser is not None
                 tab = await self._browser.get("about:blank", new_tab=True)
             try:
                 yield tab
@@ -140,9 +165,12 @@ class BrowserPool:
         finally:
             sem.release()
 
-    def _make_json_interceptor(self, tab, intercepted: list[dict], ready: asyncio.Event):
+    def _make_json_interceptor(
+        self, tab: zd.Tab, intercepted: list[dict[str, Any]], ready: asyncio.Event
+    ) -> Callable[[zd.cdp.network.ResponseReceived], Coroutine[Any, Any, None]]:
         """Build a handler that captures interesting JSON responses for content extraction."""
-        async def on_response_received(event):
+
+        async def on_response_received(event: zd.cdp.network.ResponseReceived) -> None:
             resp = event.response
             ct = resp.headers.get("content-type", "")
             if "json" not in ct or resp.status != 200:
@@ -151,24 +179,32 @@ class BrowserPool:
                 body_result = await tab.send(
                     zd.cdp.network.get_response_body(request_id=event.request_id)
                 )
-                body_str = body_result.body if body_result else ""
+                body_str = body_result[0] if body_result else ""
                 if not body_str:
                     return
                 data = json.loads(body_str)
                 if isinstance(data, dict):
-                    flat = {**data, **{k: v for d in data.values()
-                                       if isinstance(d, dict) for k, v in d.items()}}
+                    flat = {
+                        **data,
+                        **{
+                            k: v
+                            for d in data.values()
+                            if isinstance(d, dict)
+                            for k, v in d.items()
+                        },
+                    }
                     if CONTENT_JSON_KEYS & flat.keys():
                         intercepted.append(flat)
                         ready.set()
             except Exception as exc:
                 log.debug("json intercept failed: %s", exc)
+
         return on_response_received
 
-    async def get_html(self, url: str) -> tuple[str, str, list[dict]]:
+    async def get_html(self, url: str) -> tuple[str, str, list[dict[str, Any]]]:
         init_script = site_config.init_script_for(url)
 
-        intercepted_json: list[dict] = []
+        intercepted_json: list[dict[str, Any]] = []
         content_ready = asyncio.Event()
 
         async with self.acquire_tab() as tab:
@@ -177,7 +213,9 @@ class BrowserPool:
 
             if init_script:
                 await tab.send(
-                    zd.cdp.page.add_script_to_evaluate_on_new_document(source=init_script)
+                    zd.cdp.page.add_script_to_evaluate_on_new_document(
+                        source=init_script
+                    )
                 )
 
             tab.add_handler(
@@ -194,7 +232,9 @@ class BrowserPool:
 
             if not content_ready.is_set():
                 try:
-                    await asyncio.wait_for(asyncio.shield(tab), timeout=settings.browser_timeout)
+                    await asyncio.wait_for(
+                        asyncio.shield(tab), timeout=settings.browser_timeout
+                    )
                 except (asyncio.TimeoutError, Exception) as exc:
                     log.debug("browser navigation wait timed out: %s", exc)
 
@@ -203,7 +243,8 @@ class BrowserPool:
             except Exception as exc:
                 log.debug("cookie dismiss failed: %s", exc)
 
-            final_url = await tab.evaluate("window.location.href")
+            loc = await tab.evaluate("window.location.href")
+            final_url = loc if isinstance(loc, str) else url
             top_html = await tab.get_content()
 
             frame_htmls: list[str] = []
@@ -221,10 +262,12 @@ class BrowserPool:
             html = top_html + "\n".join(frame_htmls)
             return html, final_url, intercepted_json
 
-    async def execute_html(self, html: str, origin_url: str) -> tuple[str, str, list[dict]]:
+    async def execute_html(
+        self, html: str, origin_url: str
+    ) -> tuple[str, str, list[dict[str, Any]]]:
         import urllib.parse
 
-        intercepted_json: list[dict] = []
+        intercepted_json: list[dict[str, Any]] = []
         content_ready = asyncio.Event()
 
         async with self.acquire_tab() as tab:

@@ -1,6 +1,7 @@
 import tempfile
 from pydantic_settings import BaseSettings
 from pathlib import Path
+from typing import Any
 import yaml
 
 
@@ -38,13 +39,18 @@ class SiteConfig:
                 data = yaml.safe_load(f) or {}
         except FileNotFoundError:
             data = {}
-        self._global_selectors: list[str] = data.get("strip_selectors", [])
-        self._global_strip_lines: list[str] = data.get("strip_lines", [])
-        self._domains: dict[str, dict] = data.get("domains", {})
-        self._init_scripts: dict[str, str] = data.get("init_scripts", {})
+        self._global_selectors: list[str] = [
+            str(s) for s in data.get("strip_selectors", [])
+        ]
+        self._global_strip_lines: list[str] = [
+            str(s) for s in data.get("strip_lines", [])
+        ]
+        self._domains: dict[str, dict[str, Any]] = data.get("domains", {}) or {}
+        self._init_scripts: dict[str, str] = data.get("init_scripts", {}) or {}
 
-    def _domain_cfg(self, url: str) -> dict:
+    def _domain_cfg(self, url: str) -> dict[str, Any]:
         from urllib.parse import urlparse
+
         host = urlparse(url).netloc.lower()
         # Try progressively shorter suffixes: edition.cnn.com → cnn.com → com
         parts = host.split(".")
@@ -55,36 +61,56 @@ class SiteConfig:
         return {}
 
     def selectors_for(self, url: str) -> list[str]:
-        return self._global_selectors + self._domain_cfg(url).get("strip_selectors", [])
+        extra = self._domain_cfg(url).get("strip_selectors", [])
+        return self._global_selectors + [str(s) for s in extra]
 
     def strip_lines_for(self, url: str) -> list[str]:
-        return self._global_strip_lines + self._domain_cfg(url).get("strip_lines", [])
+        extra = self._domain_cfg(url).get("strip_lines", [])
+        return self._global_strip_lines + [str(s) for s in extra]
 
     def proxy_url_for(self, url: str) -> str | None:
         proxy = self._domain_cfg(url).get("proxy_url")
         if proxy:
-            return proxy.rstrip("/") + "/" + url
+            return str(proxy).rstrip("/") + "/" + url
         return None
 
     def init_script_for(self, url: str) -> str | None:
         from urllib.parse import urlparse
+
         host = urlparse(url).netloc.lower().removeprefix("www.")
-        return (self._domain_cfg(url).get("init_script")
-                or self._init_scripts.get(host))
+        return self._domain_cfg(url).get("init_script") or self._init_scripts.get(host)
 
 
-TRACKING_PARAMS = frozenset({
-    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    "fbclid", "gclid", "msclkid", "yclid", "_hsenc", "_hsmi",
-    "mc_cid", "mc_eid", "ref", "ref_src", "ref_url", "source",
-})
+TRACKING_PARAMS = frozenset(
+    {
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "fbclid",
+        "gclid",
+        "msclkid",
+        "yclid",
+        "_hsenc",
+        "_hsmi",
+        "mc_cid",
+        "mc_eid",
+        "ref",
+        "ref_src",
+        "ref_url",
+        "source",
+    }
+)
 
 
 def normalize_url(url: str) -> str:
     from urllib.parse import urlparse, urlencode, parse_qsl
+
     u = urlparse(url)
-    clean_query = urlencode([(k, v) for k, v in parse_qsl(u.query)
-                              if k.lower() not in TRACKING_PARAMS])
+    clean_query = urlencode(
+        [(k, v) for k, v in parse_qsl(u.query) if k.lower() not in TRACKING_PARAMS]
+    )
     return u._replace(fragment="", query=clean_query).geturl()
 
 
@@ -96,6 +122,7 @@ def detect_content_type(url: str, content_type_header: str) -> str:
     """
     from pathlib import PurePosixPath
     from urllib.parse import urlparse
+
     ct = content_type_header.lower()
     if "text/html" in ct or "application/xhtml" in ct:
         return "html"

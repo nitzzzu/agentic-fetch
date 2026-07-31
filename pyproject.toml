@@ -16,7 +16,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "respx>=0.21", "ruff>=0.6"]
+dev = [
+    "import-linter>=2.13",
+    "mutmut>=3.7.0",
+    "mypy>=2.3.0",
+    "pip-audit>=2.10.1",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-bdd>=8.1.0",
+    "pytest-cov>=7.1.0",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "types-pyyaml>=6.0.12.20260724",
+]
 
 [project.scripts]
 agentic-search = "agentic_fetch.cli.search:main"
@@ -34,3 +46,73 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff.lint]
+extend-select = ["C901"]
+
+# Ratchet: 25 is the current worst offender (FetchEngine.fetch — the 4-tier
+# waterfall). Lower this as hotspots get refactored; never raise it.
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src/agentic_fetch"]
+
+# readability-lxml ships neither stubs nor a py.typed marker.
+[[tool.mypy.overrides]]
+module = "readability.*"
+ignore_missing_imports = true
+
+[tool.mutmut]
+# Mutation gate scope: the deterministic core (pure text processing, cache,
+# config, schemas). Network/browser modules are exercised by integration
+# tests that cannot run inside the mutation sandbox.
+source_paths = ["src"]
+only_mutate = [
+    "src/agentic_fetch/markdown.py",
+    "src/agentic_fetch/cache.py",
+    "src/agentic_fetch/config.py",
+    "src/agentic_fetch/models.py",
+]
+also_copy = ["config.yaml"]
+pytest_add_cli_args_test_selection = [
+    "tests/",
+    "--ignore=tests/test_integration.py",
+    "--ignore=tests/test_api_live.py",
+]
+
+[tool.importlinter]
+root_package = "agentic_fetch"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture (app -> engines -> plugins -> infra -> core)"
+type = "layers"
+containers = ["agentic_fetch"]
+exhaustive = false
+layers = [
+    "main",
+    "fetch | search",
+    "plugins",
+    "browser | cache",
+    "http_client | markdown",
+    "config | models",
+]
+
+[[tool.importlinter.contracts]]
+name = "CLI wrappers talk to the service over HTTP only"
+type = "forbidden"
+source_modules = ["agentic_fetch.cli"]
+forbidden_modules = [
+    "agentic_fetch.main",
+    "agentic_fetch.fetch",
+    "agentic_fetch.search",
+    "agentic_fetch.browser",
+    "agentic_fetch.cache",
+    "agentic_fetch.markdown",
+    "agentic_fetch.plugins",
+    "agentic_fetch.http_client",
+    "agentic_fetch.config",
+    "agentic_fetch.models",
+]

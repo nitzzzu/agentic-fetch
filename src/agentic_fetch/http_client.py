@@ -4,6 +4,7 @@ A single client is reused across the process so TCP / TLS handshakes don't burn
 on every request. The client is created on first call and closed by the FastAPI
 lifespan so tests and short-lived CLIs don't crash on shutdown.
 """
+
 import asyncio
 import weakref
 
