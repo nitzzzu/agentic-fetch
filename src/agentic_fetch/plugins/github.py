@@ -13,16 +13,19 @@ class GitHubPlugin(FetchPlugin):
     name = "github"
     domains = ["github.com", "www.github.com", "raw.githubusercontent.com"]
 
-    HEADERS = {"Accept": "application/vnd.github.v3+json", "User-Agent": "agentic-fetch/1.0"}
+    HEADERS = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "agentic-fetch/1.0",
+    }
     TRENDING_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
 
     @classmethod
-    def _api_headers(cls, accept: str | None = None) -> dict:
+    def _api_headers(cls, accept: str | None = None) -> dict[str, str]:
         """API headers with GITHUB_TOKEN auth when available (5,000 req/hr vs 60)."""
         headers = {**cls.HEADERS}
         if accept:
@@ -32,12 +35,12 @@ class GitHubPlugin(FetchPlugin):
             headers["Authorization"] = f"Bearer {token}"
         return headers
 
-    RE_TRENDING = re.compile(r'^/trending(/[^/?]+)?$')
-    RE_REPO = re.compile(r'^/([^/]+)/([^/]+)/?$')
-    RE_FILE = re.compile(r'^/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$')
-    RE_ISSUE = re.compile(r'^/([^/]+)/([^/]+)/issues/(\d+)$')
-    RE_PR = re.compile(r'^/([^/]+)/([^/]+)/pull/(\d+)$')
-    RE_RAW = re.compile(r'^/([^/]+)/([^/]+)/([^/]+)/(.+)$')
+    RE_TRENDING = re.compile(r"^/trending(/[^/?]+)?$")
+    RE_REPO = re.compile(r"^/([^/]+)/([^/]+)/?$")
+    RE_FILE = re.compile(r"^/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$")
+    RE_ISSUE = re.compile(r"^/([^/]+)/([^/]+)/issues/(\d+)$")
+    RE_PR = re.compile(r"^/([^/]+)/([^/]+)/pull/(\d+)$")
+    RE_RAW = re.compile(r"^/([^/]+)/([^/]+)/([^/]+)/(.+)$")
 
     async def fetch(self, url: str, req: FetchRequest) -> FetchResponse | None:
         parsed = urlparse(url)
@@ -55,20 +58,35 @@ class GitHubPlugin(FetchPlugin):
             since = parse_qs(parsed.query).get("since", ["daily"])[0]
             return await self._fetch_trending(lang, since, req, url)
         if m := self.RE_FILE.match(path):
-            return await self._fetch_file(*m.groups(), req, url)
+            owner, repo, branch, file_path = m.groups()
+            return await self._fetch_file(owner, repo, branch, file_path, req, url)
         if m := self.RE_ISSUE.match(path):
-            return await self._fetch_issue(*m.groups(), req, url)
+            owner, repo, number = m.groups()
+            return await self._fetch_issue(owner, repo, number, req, url)
         if m := self.RE_PR.match(path):
-            return await self._fetch_pr(*m.groups(), req, url)
+            owner, repo, number = m.groups()
+            return await self._fetch_pr(owner, repo, number, req, url)
         if m := self.RE_REPO.match(path):
-            return await self._fetch_repo(*m.groups(), req, url)
+            owner, repo = m.groups()
+            return await self._fetch_repo(owner, repo, req, url)
 
         return None
 
-    async def _fetch_trending(self, language: str, since: str, req: FetchRequest, url: str) -> FetchResponse:
-        trend_url = f"https://github.com/trending/{language}" if language else "https://github.com/trending"
+    async def _fetch_trending(
+        self, language: str, since: str, req: FetchRequest, url: str
+    ) -> FetchResponse:
+        trend_url = (
+            f"https://github.com/trending/{language}"
+            if language
+            else "https://github.com/trending"
+        )
         c = get_client()
-        r = await c.get(trend_url, params={"since": since}, headers=self.TRENDING_HEADERS, timeout=15)
+        r = await c.get(
+            trend_url,
+            params={"since": since},
+            headers=self.TRENDING_HEADERS,
+            timeout=15,
+        )
         r.raise_for_status()
 
         soup = BeautifulSoup(r.text, "html.parser")
@@ -78,7 +96,8 @@ class GitHubPlugin(FetchPlugin):
             h2_a = article.select_one("h2 a, h1 a")
             if not h2_a:
                 continue
-            repo_path = h2_a.get("href", "").strip()
+            href = h2_a.get("href", "")
+            repo_path = href.strip() if isinstance(href, str) else ""
             parts = repo_path.strip("/").split("/")
             if len(parts) != 2:
                 continue
@@ -95,7 +114,9 @@ class GitHubPlugin(FetchPlugin):
             stars = stars_el.get_text(strip=True).replace(",", "") if stars_el else "0"
 
             # forks: link to /forks or /network/members
-            forks_el = article.select_one("a[href$='/forks'], a[href$='/network/members']")
+            forks_el = article.select_one(
+                "a[href$='/forks'], a[href$='/network/members']"
+            )
             forks = forks_el.get_text(strip=True).replace(",", "") if forks_el else "0"
 
             # stars today: last span containing "stars today"
@@ -103,19 +124,26 @@ class GitHubPlugin(FetchPlugin):
             for span in article.select("span"):
                 t = span.get_text(strip=True)
                 if "stars today" in t or "star today" in t:
-                    today_stars = t.replace("stars today", "").replace("star today", "").strip()
+                    today_stars = (
+                        t.replace("stars today", "").replace("star today", "").strip()
+                    )
                     break
 
-            repos.append({
-                "owner": owner, "repo": repo,
-                "description": description,
-                "language": language_name,
-                "stars": stars,
-                "forks": forks,
-                "today": today_stars,
-            })
+            repos.append(
+                {
+                    "owner": owner,
+                    "repo": repo,
+                    "description": description,
+                    "language": language_name,
+                    "stars": stars,
+                    "forks": forks,
+                    "today": today_stars,
+                }
+            )
 
-        period = {"daily": "today", "weekly": "this week", "monthly": "this month"}.get(since, since)
+        period = {"daily": "today", "weekly": "this week", "monthly": "this month"}.get(
+            since, since
+        )
         lang_label = f" · {language}" if language else ""
         title = f"GitHub Trending{lang_label} — {period}"
 
@@ -125,19 +153,33 @@ class GitHubPlugin(FetchPlugin):
             md = f"# {title}\n\n"
             md += f"| # | Repository | Description | Lang | Stars | Forks | {period.capitalize()} |\n"
             md += "|---|------------|-------------|------|------:|------:|-------|\n"
-            for i, r in enumerate(repos, 1):
-                repo_url = f"https://github.com/{r['owner']}/{r['repo']}"
-                desc = r["description"].replace("|", "\\|")[:80] + ("…" if len(r["description"]) > 80 else "")
-                md += (f"| {i} | [{r['owner']}/{r['repo']}]({repo_url}) "
-                       f"| {desc} | {r['language']} | {r['stars']} | {r['forks']} | ⭐ {r['today']} |\n")
+            for i, entry in enumerate(repos, 1):
+                repo_url = f"https://github.com/{entry['owner']}/{entry['repo']}"
+                desc = entry["description"].replace("|", "\\|")[:80] + (
+                    "…" if len(entry["description"]) > 80 else ""
+                )
+                md += (
+                    f"| {i} | [{entry['owner']}/{entry['repo']}]({repo_url}) "
+                    f"| {desc} | {entry['language']} | {entry['stars']} | {entry['forks']} | ⭐ {entry['today']} |\n"
+                )
 
-        return FetchResponse(url=url, title=title, markdown=md,
-                             plugin_used=self.name, method_used="plugin")
+        return FetchResponse(
+            url=url,
+            title=title,
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
+        )
 
-    async def _fetch_repo(self, owner, repo, req, url) -> FetchResponse:
+    async def _fetch_repo(
+        self, owner: str, repo: str, req: FetchRequest, url: str
+    ) -> FetchResponse:
         c = get_client()
-        r = await c.get(f"https://api.github.com/repos/{owner}/{repo}",
-                        headers=self._api_headers(), timeout=15)
+        r = await c.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            headers=self._api_headers(),
+            timeout=15,
+        )
         r.raise_for_status()
         info = r.json()
         readme_r = await c.get(
@@ -159,10 +201,23 @@ class GitHubPlugin(FetchPlugin):
         if readme_r.is_success:
             md += readme_r.text
 
-        return FetchResponse(url=url, title=info["full_name"], markdown=md,
-                             plugin_used=self.name, method_used="plugin")
+        return FetchResponse(
+            url=url,
+            title=info["full_name"],
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
+        )
 
-    async def _fetch_file(self, owner, repo, branch, path, req, url) -> FetchResponse:
+    async def _fetch_file(
+        self,
+        owner: str,
+        repo: str,
+        branch: str,
+        path: str,
+        req: FetchRequest,
+        url: str,
+    ) -> FetchResponse:
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
         try:
             c = get_client()
@@ -170,15 +225,31 @@ class GitHubPlugin(FetchPlugin):
             r.raise_for_status()
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            error_msg = f"404 Not Found: {raw_url}" if status == 404 else f"Failed to fetch file: {exc}"
+            error_msg = (
+                f"404 Not Found: {raw_url}"
+                if status == 404
+                else f"Failed to fetch file: {exc}"
+            )
             md = f"# {path}\n\n**Error:** {error_msg}\n"
-            return FetchResponse(url=url, title=path, markdown=md,
-                                 plugin_used=self.name, method_used="plugin",
-                                 error=error_msg)
+            return FetchResponse(
+                url=url,
+                title=path,
+                markdown=md,
+                plugin_used=self.name,
+                method_used="plugin",
+                error=error_msg,
+            )
 
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-        lang_map = {"py": "python", "ts": "typescript", "js": "javascript",
-                    "rs": "rust", "go": "go", "java": "java", "md": ""}
+        lang_map = {
+            "py": "python",
+            "ts": "typescript",
+            "js": "javascript",
+            "rs": "rust",
+            "go": "go",
+            "java": "java",
+            "md": "",
+        }
         lang = lang_map.get(ext, ext)
 
         md = f"# {path}\n\n"
@@ -187,18 +258,29 @@ class GitHubPlugin(FetchPlugin):
         else:
             md += r.text
 
-        return FetchResponse(url=url, title=path, markdown=md,
-                             plugin_used=self.name, method_used="plugin")
+        return FetchResponse(
+            url=url,
+            title=path,
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
+        )
 
-    async def _fetch_issue(self, owner, repo, number, req, url) -> FetchResponse:
+    async def _fetch_issue(
+        self, owner: str, repo: str, number: str, req: FetchRequest, url: str
+    ) -> FetchResponse:
         c = get_client()
-        r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/issues/{number}",
-                        headers=self._api_headers(), timeout=15)
+        r = await c.get(
+            f"https://api.github.com/repos/{owner}/{repo}/issues/{number}",
+            headers=self._api_headers(),
+            timeout=15,
+        )
         r.raise_for_status()
         issue = r.json()
         comments_r = await c.get(
             f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments",
-            headers=self._api_headers(), timeout=15,
+            headers=self._api_headers(),
+            timeout=15,
         )
         comments = comments_r.json() if comments_r.is_success else []
 
@@ -212,17 +294,33 @@ class GitHubPlugin(FetchPlugin):
             for comment in comments:
                 md += f"**{comment['user']['login']}** · {comment['created_at'][:10]}\n\n{comment['body']}\n\n---\n\n"
 
-        return FetchResponse(url=url, title=issue["title"], markdown=md,
-                             plugin_used=self.name, method_used="plugin")
+        return FetchResponse(
+            url=url,
+            title=issue["title"],
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
+        )
 
-    async def _fetch_pr(self, owner, repo, number, req, url) -> FetchResponse:
+    async def _fetch_pr(
+        self, owner: str, repo: str, number: str, req: FetchRequest, url: str
+    ) -> FetchResponse:
         c = get_client()
-        r = await c.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}",
-                        headers=self._api_headers(), timeout=15)
+        r = await c.get(
+            f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}",
+            headers=self._api_headers(),
+            timeout=15,
+        )
         r.raise_for_status()
         pr = r.json()
 
-        state_badge = "Open" if pr["state"] == "open" else "Merged" if pr.get("merged") else "Closed"
+        state_badge = (
+            "Open"
+            if pr["state"] == "open"
+            else "Merged"
+            if pr.get("merged")
+            else "Closed"
+        )
         md = f"# {pr['title']}\n\n"
         md += f"**#{number}** · {state_badge} · {pr['user']['login']} · {pr['created_at'][:10]}\n\n"
         md += f"**Branch:** `{pr['head']['ref']}` -> `{pr['base']['ref']}`\n\n"
@@ -230,5 +328,10 @@ class GitHubPlugin(FetchPlugin):
         if pr.get("body"):
             md += pr["body"]
 
-        return FetchResponse(url=url, title=pr["title"], markdown=md,
-                             plugin_used=self.name, method_used="plugin")
+        return FetchResponse(
+            url=url,
+            title=pr["title"],
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
+        )

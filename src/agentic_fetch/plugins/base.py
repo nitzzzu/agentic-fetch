@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    from ..models import FetchResponse
+    from ..models import FetchRequest, FetchResponse
 
 
 class FetchPlugin(ABC):
@@ -12,7 +12,7 @@ class FetchPlugin(ABC):
     domains: list[str] = []
 
     @abstractmethod
-    async def fetch(self, url: str, req) -> "FetchResponse | None":
+    async def fetch(self, url: str, req: "FetchRequest") -> "FetchResponse | None":
         """Return FetchResponse or None to fall through to default path."""
         ...
 

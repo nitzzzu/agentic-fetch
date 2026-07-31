@@ -9,19 +9,37 @@ from ..config import settings
 from ..http_client import get_client
 
 MEDIUM_DOMAINS = {
-    "medium.com", "towardsdatascience.com", "betterprogramming.pub",
-    "betterhumans.pub", "uxdesign.cc", "levelup.gitconnected.com",
-    "hackernoon.com", "aws.plainenglish.io", "javascript.plainenglish.io",
-    "python.plainenglish.io", "pub.towardsai.net",
+    "medium.com",
+    "towardsdatascience.com",
+    "betterprogramming.pub",
+    "betterhumans.pub",
+    "uxdesign.cc",
+    "levelup.gitconnected.com",
+    "hackernoon.com",
+    "aws.plainenglish.io",
+    "javascript.plainenglish.io",
+    "python.plainenglish.io",
+    "pub.towardsai.net",
 }
 
 FREEDIUM = "https://freedium-mirror.cfd/"
 
 SKIP_PATTERNS = [
-    "Freedium", "Ko-fi", "Patreon", "Liberapay",
-    "We've reached", "Milestone:", "< Go to the original",
-    "Preview image", "Reporting a Problem", "min read ·",
-    "Free: No", "Free: Yes", "Sign up", "Sign in", "Open in app",
+    "Freedium",
+    "Ko-fi",
+    "Patreon",
+    "Liberapay",
+    "We've reached",
+    "Milestone:",
+    "< Go to the original",
+    "Preview image",
+    "Reporting a Problem",
+    "min read ·",
+    "Free: No",
+    "Free: Yes",
+    "Sign up",
+    "Sign in",
+    "Open in app",
 ]
 
 
@@ -44,10 +62,13 @@ class MediumPlugin(FetchPlugin):
 
         title = ""
         if t := soup.find("title"):
-            title = re.sub(r'\s*[|•-]\s*(Medium|Freedium).*$', '', t.get_text(strip=True))
+            title = re.sub(
+                r"\s*[|•-]\s*(Medium|Freedium).*$", "", t.get_text(strip=True)
+            )
         author = ""
         if a := soup.find("meta", attrs={"name": "author"}):
-            author = a.get("content", "")
+            content = a.get("content", "")
+            author = content if isinstance(content, str) else ""
 
         for sel in ["header", "footer", "nav", ".sidebar", ".donation", "#top-bar"]:
             for el in soup.select(sel):
@@ -68,8 +89,11 @@ class MediumPlugin(FetchPlugin):
             md = f"*Author: {author}*\n\n" + md
 
         return FetchResponse(
-            url=url, title=title, markdown=md,
-            plugin_used=self.name, method_used="plugin",
+            url=url,
+            title=title,
+            markdown=md,
+            plugin_used=self.name,
+            method_used="plugin",
         )
 
     def _clean(self, md: str, title: str) -> str:
@@ -80,14 +104,14 @@ class MediumPlugin(FetchPlugin):
         for line in lines:
             if any(pat in line for pat in SKIP_PATTERNS):
                 continue
-            if re.match(r'^\s*\[.*\]\(.*\)\s*$', line) and len(line.strip()) < 100:
+            if re.match(r"^\s*\[.*\]\(.*\)\s*$", line) and len(line.strip()) < 100:
                 if not in_article:
                     continue
-            if not in_article and line.startswith('#'):
+            if not in_article and line.startswith("#"):
                 if len(line.strip()) > 5:
                     in_article = True
             if in_article:
                 result.append(line)
 
-        text = '\n'.join(result)
-        return re.sub(r'\n{3,}', '\n\n', text).strip()
+        text = "\n".join(result)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()

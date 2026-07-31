@@ -15,6 +15,7 @@ class GogGamesPlugin(FetchPlugin):
             return None
 
         from ..browser import browser_pool
+
         html, final_url, _ = await browser_pool.get_html(url)
         soup = BeautifulSoup(html, "html.parser")
 
@@ -27,9 +28,9 @@ class GogGamesPlugin(FetchPlugin):
         rating = release_date = gog_rank = developer = publisher = genres = tags = ""
         if len(meta_els) >= 1:
             parts = meta_els[0].get_text(strip=True).split("|")
-            rating       = parts[0].strip() if len(parts) > 0 else ""
+            rating = parts[0].strip() if len(parts) > 0 else ""
             release_date = parts[1].strip() if len(parts) > 1 else ""
-            gog_rank     = parts[2].strip() if len(parts) > 2 else ""
+            gog_rank = parts[2].strip() if len(parts) > 2 else ""
         if len(meta_els) >= 2:
             parts = meta_els[1].get_text(strip=True).split("|")
             developer = parts[0].strip() if len(parts) > 0 else ""
@@ -43,7 +44,8 @@ class GogGamesPlugin(FetchPlugin):
         magnet = ""
         torrent_a = soup.select_one("a.btn-torrent")
         if torrent_a:
-            magnet = torrent_a.get("href", "")
+            href = torrent_a.get("href", "")
+            magnet = href if isinstance(href, str) else ""
 
         # Direct download links per host
         download_links: list[tuple[str, str, str]] = []  # (host, filename, url)
@@ -53,9 +55,11 @@ class GogGamesPlugin(FetchPlugin):
             for a in details.select("a[href]"):
                 link_url = a.get("href", "")
                 div_title = a.select_one("div[title]")
-                filename = div_title.get("title", "") if div_title else a.get_text(strip=True)
-                if link_url:
-                    download_links.append((host, filename, link_url))
+                filename = (
+                    div_title.get("title", "") if div_title else a.get_text(strip=True)
+                )
+                if isinstance(link_url, str) and link_url:
+                    download_links.append((host, str(filename or ""), link_url))
 
         # GOG installer file list (filenames + sizes, no direct links)
         installers: list[tuple[str, str]] = []
@@ -63,7 +67,7 @@ class GogGamesPlugin(FetchPlugin):
             spans = row.select("span")
             if len(spans) >= 2:
                 filename = spans[0].get_text(strip=True)
-                size     = spans[1].get_text(strip=True)
+                size = spans[1].get_text(strip=True)
                 if filename:
                     installers.append((filename, size))
 

@@ -5,6 +5,7 @@ import os
 import httpx
 from html import unescape
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
@@ -20,13 +21,13 @@ _GITHUB_HEADERS = {
 }
 _REDDIT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/html, */*",
     "Accept-Language": "en-US,en;q=0.9",
 }
 _TREND_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
@@ -36,17 +37,18 @@ _RETRY_ATTEMPTS = 2
 _RETRY_BACKOFF = 2.0  # seconds
 
 
-def _decode_json(r: httpx.Response) -> dict:
+def _decode_json(r: httpx.Response) -> dict[str, Any]:
     """Decode JSON from raw bytes to avoid CP1252/Latin-1 misdetection on Windows."""
-    return _json.loads(r.content)
+    data: dict[str, Any] = _json.loads(r.content)
+    return data
 
 
 async def _get_with_retry(
     client: httpx.AsyncClient,
     url: str,
     *,
-    params: dict | None = None,
-    headers: dict | None = None,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 30.0,
     attempts: int = _RETRY_ATTEMPTS,
     backoff: float = _RETRY_BACKOFF,
@@ -75,9 +77,11 @@ class SearchEngine:
             return self._cache_search(req)
         if req.engine == "google" and not browser_pool.is_running:
             return SearchResponse(
-                query=req.query, engine_used="google", results=[],
+                query=req.query,
+                engine_used="google",
+                results=[],
                 error="Google search needs the browser pool, which isn't running. "
-                      "Use engine=duckduckgo (browser-free lite endpoint) or restart the service.",
+                "Use engine=duckduckgo (browser-free lite endpoint) or restart the service.",
             )
         if req.engine in ("auto", "google"):
             try:
@@ -85,7 +89,9 @@ class SearchEngine:
             except Exception as exc:
                 if req.engine == "google":
                     return SearchResponse(
-                        query=req.query, engine_used="google", results=[],
+                        query=req.query,
+                        engine_used="google",
+                        results=[],
                         error=f"Google search failed: {exc}",
                     )
         return await self._duckduckgo(req)
@@ -112,8 +118,10 @@ class SearchEngine:
                 "past_year": "qdr:y",
             }[req.date_preset]
         if req.date_from or req.date_to:
+
             def _fmt(d: str) -> str:
                 return datetime.fromisoformat(d).strftime("%m/%d/%Y")
+
             cd_min = _fmt(req.date_from) if req.date_from else ""
             cd_max = _fmt(req.date_to) if req.date_to else ""
             return f"cdr:1,cd_min:{cd_min},cd_max:{cd_max}"
@@ -135,22 +143,26 @@ class SearchEngine:
         # Fall back to the JS endpoint via the browser pool.
         if not browser_pool.is_running:
             return SearchResponse(
-                query=req.query, engine_used="duckduckgo", results=[],
+                query=req.query,
+                engine_used="duckduckgo",
+                results=[],
                 error="DuckDuckGo lite returned nothing and the browser pool isn't "
-                      "running, so the JS fallback is unavailable.",
+                "running, so the JS fallback is unavailable.",
             )
         url = f"https://duckduckgo.com/?q={quote_plus(req.query)}&ia=web"
         html, _, _ = await browser_pool.get_html(url)
         results = self._parse_ddg(html, req.max_results)
-        return SearchResponse(query=req.query, engine_used="duckduckgo", results=results)
+        return SearchResponse(
+            query=req.query, engine_used="duckduckgo", results=results
+        )
 
     async def _ddg_lite(self, req: SearchRequest) -> list[SearchResult]:
         """Fast browser-free DDG search via the html.duckduckgo.com endpoint."""
         url = "https://html.duckduckgo.com/html/"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/124.0.0.0 Safari/537.36",
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
@@ -162,13 +174,15 @@ class SearchEngine:
     def _parse_ddg_lite(self, html: str, limit: int) -> list[SearchResult]:
         soup = BeautifulSoup(html, "html.parser")
         from urllib.parse import urlparse, parse_qs, unquote
+
         results: list[SearchResult] = []
         for result in soup.select("div.result, div.web-result"):
             a = result.select_one("a.result__a, a.result-link")
             snippet_el = result.select_one(".result__snippet, .result-snippet")
             if not a:
                 continue
-            href = a.get("href", "")
+            href_attr = a.get("href", "")
+            href = href_attr if isinstance(href_attr, str) else ""
             # DDG wraps target URLs in /l/?uddg=<encoded>; unwrap before returning.
             if href.startswith("//"):
                 href = "https:" + href
@@ -178,11 +192,13 @@ class SearchEngine:
                     href = unquote(qs["uddg"][0])
             if not href.startswith("http"):
                 continue
-            results.append(SearchResult(
-                title=a.get_text(strip=True),
-                url=href,
-                snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
-            ))
+            results.append(
+                SearchResult(
+                    title=a.get_text(strip=True),
+                    url=href,
+                    snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
+                )
+            )
             if len(results) >= limit:
                 break
         return results
@@ -198,43 +214,55 @@ class SearchEngine:
         subreddit = req.subreddit
         if not subreddit:
             import re as _re
+
             m = _re.match(r"subreddit:(\w+)\s*", query, _re.IGNORECASE)
             if m:
                 subreddit = m.group(1)
-                query = query[m.end():].strip()
+                query = query[m.end() :].strip()
 
         # When browsing a subreddit with no search query, use listing endpoint
         if subreddit and not query:
             listing_sort = sort if sort in ("hot", "new", "top", "rising") else "hot"
-            listing_params: dict = {"limit": req.max_results}
+            listing_params: dict[str, Any] = {"limit": req.max_results}
             if listing_sort == "top" and time_filter:
                 listing_params["t"] = time_filter
             json_url = f"https://www.reddit.com/r/{subreddit}/{listing_sort}.json"
             try:
                 c = get_client()
                 r = await _get_with_retry(
-                    c, json_url, params=listing_params, headers=_REDDIT_HEADERS,
+                    c,
+                    json_url,
+                    params=listing_params,
+                    headers=_REDDIT_HEADERS,
                 )
                 if r.status_code == 429:
                     return SearchResponse(
-                        query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                        query=req.query,
+                        engine_used=f"reddit/r/{subreddit}",
+                        results=[],
                         error="Reddit rate limit (429). Try again in a few seconds.",
                     )
                 if r.headers.get("content-type", "").startswith("text/html"):
                     return SearchResponse(
-                        query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                        query=req.query,
+                        engine_used=f"reddit/r/{subreddit}",
+                        results=[],
                         error="Reddit blocked the request (returned HTML). Retry shortly.",
                     )
                 r.raise_for_status()
                 data = _decode_json(r)
             except httpx.HTTPStatusError as e:
                 return SearchResponse(
-                    query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                    query=req.query,
+                    engine_used=f"reddit/r/{subreddit}",
+                    results=[],
                     error=f"Reddit HTTP {e.response.status_code}: {e.response.text[:200]}",
                 )
             except httpx.RequestError as e:
                 return SearchResponse(
-                    query=req.query, engine_used=f"reddit/r/{subreddit}", results=[],
+                    query=req.query,
+                    engine_used=f"reddit/r/{subreddit}",
+                    results=[],
                     error=f"Reddit request failed: {e}",
                 )
 
@@ -245,23 +273,33 @@ class SearchEngine:
                 post = child.get("data", {})
                 title = unescape(post.get("title", ""))
                 permalink = post.get("permalink", "")
-                url = f"https://www.reddit.com{permalink}" if permalink.startswith("/") else permalink
+                url = (
+                    f"https://www.reddit.com{permalink}"
+                    if permalink.startswith("/")
+                    else permalink
+                )
                 sub = post.get("subreddit", "")
                 author = post.get("author", "")
                 score = post.get("score", 0)
                 num_comments = post.get("num_comments", 0)
-                created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).strftime("%Y-%m-%d")
-                snippet = (f"**r/{sub}** · u/{author} · {created} "
-                           f"· {score:,} pts · {num_comments:,} comments")
+                created = datetime.fromtimestamp(
+                    post.get("created_utc", 0), tz=timezone.utc
+                ).strftime("%Y-%m-%d")
+                snippet = (
+                    f"**r/{sub}** · u/{author} · {created} "
+                    f"· {score:,} pts · {num_comments:,} comments"
+                )
                 selftext = post.get("selftext", "")
                 if selftext and selftext not in ("[deleted]", "[removed]"):
                     preview = unescape(selftext)[:200]
                     snippet += f"\n> {preview}{'…' if len(selftext) > 200 else ''}"
                 results.append(SearchResult(title=title, url=url, snippet=snippet))
 
-            return SearchResponse(query=req.query, engine_used=f"reddit/r/{subreddit}", results=results)
+            return SearchResponse(
+                query=req.query, engine_used=f"reddit/r/{subreddit}", results=results
+            )
 
-        params: dict = {
+        params: dict[str, Any] = {
             "q": query,
             "type": "link",
             "sort": sort,
@@ -282,35 +320,50 @@ class SearchEngine:
             unsupported.append(f"date_from={req.date_from}")
         if req.date_to:
             unsupported.append(f"date_to={req.date_to}")
-        warning = (f"Reddit search does not support exact date ranges "
-                   f"({', '.join(unsupported)} ignored). "
-                   f"Use time_filter=hour|day|week|month|year instead."
-                   ) if unsupported else None
+        warning = (
+            (
+                f"Reddit search does not support exact date ranges "
+                f"({', '.join(unsupported)} ignored). "
+                f"Use time_filter=hour|day|week|month|year instead."
+            )
+            if unsupported
+            else None
+        )
 
         try:
             c = get_client()
-            r = await _get_with_retry(c, search_url, params=params, headers=_REDDIT_HEADERS)
+            r = await _get_with_retry(
+                c, search_url, params=params, headers=_REDDIT_HEADERS
+            )
             if r.status_code == 429:
                 return SearchResponse(
-                    query=req.query, engine_used="reddit", results=[],
+                    query=req.query,
+                    engine_used="reddit",
+                    results=[],
                     error="Reddit rate limit (429). Try again in a few seconds.",
                 )
             if r.headers.get("content-type", "").startswith("text/html"):
                 return SearchResponse(
-                    query=req.query, engine_used="reddit", results=[],
+                    query=req.query,
+                    engine_used="reddit",
+                    results=[],
                     error="Reddit blocked the request (returned HTML). "
-                          "The service may be rate-limited; retry shortly.",
+                    "The service may be rate-limited; retry shortly.",
                 )
             r.raise_for_status()
             data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
-                query=req.query, engine_used="reddit", results=[],
+                query=req.query,
+                engine_used="reddit",
+                results=[],
                 error=f"Reddit HTTP {e.response.status_code}: {e.response.text[:200]}",
             )
         except httpx.RequestError as e:
             return SearchResponse(
-                query=req.query, engine_used="reddit", results=[],
+                query=req.query,
+                engine_used="reddit",
+                results=[],
                 error=f"Reddit request failed: {e}",
             )
 
@@ -321,14 +374,22 @@ class SearchEngine:
             post = child.get("data", {})
             title = unescape(post.get("title", ""))
             permalink = post.get("permalink", "")
-            url = f"https://www.reddit.com{permalink}" if permalink.startswith("/") else permalink
+            url = (
+                f"https://www.reddit.com{permalink}"
+                if permalink.startswith("/")
+                else permalink
+            )
             post_subreddit = post.get("subreddit", "")
             author = post.get("author", "")
             score = post.get("score", 0)
             num_comments = post.get("num_comments", 0)
-            created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).strftime("%Y-%m-%d")
-            snippet = (f"**r/{post_subreddit}** · u/{author} · {created} "
-                       f"· {score:,} pts · {num_comments:,} comments")
+            created = datetime.fromtimestamp(
+                post.get("created_utc", 0), tz=timezone.utc
+            ).strftime("%Y-%m-%d")
+            snippet = (
+                f"**r/{post_subreddit}** · u/{author} · {created} "
+                f"· {score:,} pts · {num_comments:,} comments"
+            )
             selftext = post.get("selftext", "")
             if selftext and selftext not in ("[deleted]", "[removed]"):
                 preview = unescape(selftext)[:200]
@@ -349,7 +410,11 @@ class SearchEngine:
             headers["Authorization"] = f"Bearer {token}"
 
         q = req.query.strip()
-        if not q or q.lower() in ("trending", "trending repos", "trending repositories"):
+        if not q or q.lower() in (
+            "trending",
+            "trending repos",
+            "trending repositories",
+        ):
             return await self._github_trending(req)
 
         if (req.search_type or "repositories") == "code":
@@ -359,39 +424,58 @@ class SearchEngine:
     async def _github_trending(self, req: SearchRequest) -> SearchResponse:
         lang = req.language or ""
         period = req.period or "daily"
-        trend_url = f"https://github.com/trending/{lang}" if lang else "https://github.com/trending"
+        trend_url = (
+            f"https://github.com/trending/{lang}"
+            if lang
+            else "https://github.com/trending"
+        )
 
         try:
             c = get_client()
             r = await _get_with_retry(
-                c, trend_url, params={"since": period}, headers=_TREND_HEADERS, timeout=15,
+                c,
+                trend_url,
+                params={"since": period},
+                headers=_TREND_HEADERS,
+                timeout=15,
             )
             if r.status_code == 429:
                 return SearchResponse(
-                    query=req.query, engine_used="github trending", results=[],
+                    query=req.query,
+                    engine_used="github trending",
+                    results=[],
                     error="GitHub rate limit (429). Set GITHUB_TOKEN for higher limits.",
                 )
             r.raise_for_status()
         except httpx.HTTPStatusError as e:
             return SearchResponse(
-                query=req.query, engine_used="github trending", results=[],
+                query=req.query,
+                engine_used="github trending",
+                results=[],
                 error=f"GitHub trending HTTP {e.response.status_code}: {e.response.text[:200]}",
             )
         except httpx.RequestError as e:
             return SearchResponse(
-                query=req.query, engine_used="github trending", results=[],
+                query=req.query,
+                engine_used="github trending",
+                results=[],
                 error=f"GitHub trending request failed: {e}",
             )
 
         soup = BeautifulSoup(r.text, "html.parser")
-        period_label = {"daily": "today", "weekly": "this week", "monthly": "this month"}.get(period, period)
+        period_label = {
+            "daily": "today",
+            "weekly": "this week",
+            "monthly": "this month",
+        }.get(period, period)
         results = []
 
         for article in soup.select("article.Box-row"):
             h2_a = article.select_one("h2 a, h1 a")
             if not h2_a:
                 continue
-            repo_path = h2_a.get("href", "").strip()
+            href_attr = h2_a.get("href", "")
+            repo_path = href_attr.strip() if isinstance(href_attr, str) else ""
             parts = repo_path.strip("/").split("/")
             if len(parts) != 2:
                 continue
@@ -403,12 +487,22 @@ class SearchEngine:
             language_name = lang_el.get_text(strip=True) if lang_el else ""
             stars_el = article.select_one("a[href$='/stargazers']")
             stars = stars_el.get_text(strip=True) if stars_el else "0"
-            forks_el = article.select_one("a[href$='/forks'], a[href$='/network/members']")
+            forks_el = article.select_one(
+                "a[href$='/forks'], a[href$='/network/members']"
+            )
             forks = forks_el.get_text(strip=True) if forks_el else "0"
             period_stars = ""
             for span in article.select("span"):
                 t = span.get_text(strip=True)
-                if any(kw in t for kw in ("stars today", "star today", "stars this week", "stars this month")):
+                if any(
+                    kw in t
+                    for kw in (
+                        "stars today",
+                        "star today",
+                        "stars this week",
+                        "stars this month",
+                    )
+                ):
                     period_stars = t
                     break
 
@@ -423,14 +517,22 @@ class SearchEngine:
             if description:
                 snippet += f"\n{description}"
 
-            results.append(SearchResult(title=f"{owner}/{repo_name}", url=repo_url, snippet=snippet))
+            results.append(
+                SearchResult(
+                    title=f"{owner}/{repo_name}", url=repo_url, snippet=snippet
+                )
+            )
             if len(results) >= req.max_results:
                 break
 
         engine_label = f"github trending{' ' + lang if lang else ''} ({period_label})"
-        return SearchResponse(query=req.query, engine_used=engine_label, results=results)
+        return SearchResponse(
+            query=req.query, engine_used=engine_label, results=results
+        )
 
-    async def _github_search_repos(self, req: SearchRequest, headers: dict, q: str) -> SearchResponse:
+    async def _github_search_repos(
+        self, req: SearchRequest, headers: dict[str, str], q: str
+    ) -> SearchResponse:
         if req.language:
             q += f" language:{req.language}"
         if req.date_from and req.date_to:
@@ -441,35 +543,51 @@ class SearchEngine:
             q += f" created:<{req.date_to}"
 
         sort = req.sort or "stars"
-        params: dict = {"q": q, "sort": sort, "order": "desc", "per_page": req.max_results}
+        params: dict[str, Any] = {
+            "q": q,
+            "sort": sort,
+            "order": "desc",
+            "per_page": req.max_results,
+        }
 
         try:
             c = get_client()
             r = await _get_with_retry(
-                c, "https://api.github.com/search/repositories",
-                params=params, headers=headers, timeout=15,
+                c,
+                "https://api.github.com/search/repositories",
+                params=params,
+                headers=headers,
+                timeout=15,
             )
             if r.status_code == 429:
                 return SearchResponse(
-                    query=req.query, engine_used="github", results=[],
+                    query=req.query,
+                    engine_used="github",
+                    results=[],
                     error="GitHub API rate limit (429). Set GITHUB_TOKEN for 5,000 req/hr.",
                 )
             if r.status_code == 403:
                 msg = _decode_json(r).get("message", r.text[:200])
                 return SearchResponse(
-                    query=req.query, engine_used="github", results=[],
+                    query=req.query,
+                    engine_used="github",
+                    results=[],
                     error=f"GitHub API forbidden (403): {msg}. Set GITHUB_TOKEN.",
                 )
             r.raise_for_status()
             data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
-                query=req.query, engine_used="github", results=[],
+                query=req.query,
+                engine_used="github",
+                results=[],
                 error=f"GitHub HTTP {e.response.status_code}: {e.response.text[:200]}",
             )
         except httpx.RequestError as e:
             return SearchResponse(
-                query=req.query, engine_used="github", results=[],
+                query=req.query,
+                engine_used="github",
+                results=[],
                 error=f"GitHub request failed: {e}",
             )
 
@@ -480,56 +598,75 @@ class SearchEngine:
             lang = item.get("language") or ""
             desc = item.get("description") or ""
             updated = (item.get("updated_at") or "")[:10]
-            snippet = f"**{stars:,}** stars · {forks:,} forks · {lang} · updated {updated}"
+            snippet = (
+                f"**{stars:,}** stars · {forks:,} forks · {lang} · updated {updated}"
+            )
             if desc:
                 snippet += f"\n{desc}"
-            results.append(SearchResult(
-                title=f"{item['full_name']} ★{stars:,}",
-                url=item["html_url"],
-                snippet=snippet,
-            ))
+            results.append(
+                SearchResult(
+                    title=f"{item['full_name']} ★{stars:,}",
+                    url=item["html_url"],
+                    snippet=snippet,
+                )
+            )
 
         return SearchResponse(query=req.query, engine_used="github", results=results)
 
-    async def _github_search_code(self, req: SearchRequest, headers: dict, q: str) -> SearchResponse:
+    async def _github_search_code(
+        self, req: SearchRequest, headers: dict[str, str], q: str
+    ) -> SearchResponse:
         if req.language:
             q += f" language:{req.language}"
-        params: dict = {"q": q, "per_page": req.max_results}
+        params: dict[str, Any] = {"q": q, "per_page": req.max_results}
 
         try:
             c = get_client()
             r = await _get_with_retry(
-                c, "https://api.github.com/search/code",
-                params=params, headers=headers, timeout=15,
+                c,
+                "https://api.github.com/search/code",
+                params=params,
+                headers=headers,
+                timeout=15,
             )
             if r.status_code == 401:
                 return SearchResponse(
-                    query=req.query, engine_used="github-code", results=[],
+                    query=req.query,
+                    engine_used="github-code",
+                    results=[],
                     error="GitHub code search requires authentication. "
-                          "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
+                    "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
                 )
             if r.status_code == 403:
                 msg = _decode_json(r).get("message", r.text[:200])
                 return SearchResponse(
-                    query=req.query, engine_used="github-code", results=[],
+                    query=req.query,
+                    engine_used="github-code",
+                    results=[],
                     error=f"GitHub code search forbidden (403): {msg}. "
-                          "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
+                    "Set GITHUB_TOKEN or AF_GITHUB_TOKEN env var.",
                 )
             if r.status_code == 429:
                 return SearchResponse(
-                    query=req.query, engine_used="github-code", results=[],
+                    query=req.query,
+                    engine_used="github-code",
+                    results=[],
                     error="GitHub API rate limit (429). Set GITHUB_TOKEN for 5,000 req/hr.",
                 )
             r.raise_for_status()
             data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
-                query=req.query, engine_used="github-code", results=[],
+                query=req.query,
+                engine_used="github-code",
+                results=[],
                 error=f"GitHub code HTTP {e.response.status_code}: {e.response.text[:200]}",
             )
         except httpx.RequestError as e:
             return SearchResponse(
-                query=req.query, engine_used="github-code", results=[],
+                query=req.query,
+                engine_used="github-code",
+                results=[],
                 error=f"GitHub code request failed: {e}",
             )
 
@@ -540,15 +677,19 @@ class SearchEngine:
             snippet = f"**{repo['full_name']}**"
             if repo.get("description"):
                 snippet += f" · {repo['description']}"
-            results.append(SearchResult(title=title, url=item["html_url"], snippet=snippet))
+            results.append(
+                SearchResult(title=title, url=item["html_url"], snippet=snippet)
+            )
 
-        return SearchResponse(query=req.query, engine_used="github-code", results=results)
+        return SearchResponse(
+            query=req.query, engine_used="github-code", results=results
+        )
 
     # ── HackerNews ────────────────────────────────────────────────────────────
 
     async def _hackernews(self, req: SearchRequest) -> SearchResponse:
         story_type = req.story_type or "story"
-        params: dict = {
+        params: dict[str, Any] = {
             "query": req.query,
             "tags": story_type,
             "hitsPerPage": req.max_results,
@@ -570,32 +711,45 @@ class SearchEngine:
         try:
             c = get_client()
             r = await _get_with_retry(
-                c, "https://hn.algolia.com/api/v1/search", params=params, timeout=15,
+                c,
+                "https://hn.algolia.com/api/v1/search",
+                params=params,
+                timeout=15,
             )
             if r.status_code == 429:
                 return SearchResponse(
-                    query=req.query, engine_used="hackernews", results=[],
+                    query=req.query,
+                    engine_used="hackernews",
+                    results=[],
                     error="HackerNews (Algolia) rate limit (429). Retry in a few seconds.",
                 )
             r.raise_for_status()
             data = _decode_json(r)
         except httpx.HTTPStatusError as e:
             return SearchResponse(
-                query=req.query, engine_used="hackernews", results=[],
+                query=req.query,
+                engine_used="hackernews",
+                results=[],
                 error=f"HackerNews HTTP {e.response.status_code}: {e.response.text[:200]}",
             )
         except httpx.RequestError as e:
             return SearchResponse(
-                query=req.query, engine_used="hackernews", results=[],
+                query=req.query,
+                engine_used="hackernews",
+                results=[],
                 error=f"HackerNews request failed: {e}",
             )
 
         results = []
         for hit in data.get("hits", []):
-            raw_title = (hit.get("title")
-                         or hit.get("story_title")
-                         or (hit.get("comment_text") or "")[:80])
-            title = raw_title + ("…" if hit.get("comment_text") and len(hit["comment_text"]) > 80 else "")
+            raw_title = (
+                hit.get("title")
+                or hit.get("story_title")
+                or (hit.get("comment_text") or "")[:80]
+            )
+            title = raw_title + (
+                "…" if hit.get("comment_text") and len(hit["comment_text"]) > 80 else ""
+            )
             object_id = hit.get("objectID", "")
             hn_url = f"https://news.ycombinator.com/item?id={object_id}"
             story_url = hit.get("url") or hn_url
@@ -603,21 +757,29 @@ class SearchEngine:
             num_comments = hit.get("num_comments") or 0
             author = hit.get("author", "")
             created = (hit.get("created_at") or "")[:10]
-            snippet = f"**{points}** pts · {num_comments} comments · {author} · {created}"
+            snippet = (
+                f"**{points}** pts · {num_comments} comments · {author} · {created}"
+            )
             if hit.get("url"):
                 snippet += f"\n[HN discussion]({hn_url})"
             results.append(SearchResult(title=title, url=story_url, snippet=snippet))
 
-        return SearchResponse(query=req.query, engine_used="hackernews", results=results)
+        return SearchResponse(
+            query=req.query, engine_used="hackernews", results=results
+        )
 
     # ── Session cache BM25 ────────────────────────────────────────────────────
 
     def _cache_search(self, req: SearchRequest) -> SearchResponse:
         from .cache import fetch_cache
+
         hits = fetch_cache.search(req.query, limit=req.max_results)
         results = [
-            SearchResult(title=h["title"], url=h["url"],
-                         snippet=f"score {h['score']} — {h['snippet']}")
+            SearchResult(
+                title=h["title"],
+                url=h["url"],
+                snippet=f"score {h['score']} — {h['snippet']}",
+            )
             for h in hits
         ]
         return SearchResponse(query=req.query, engine_used="cache", results=results)
@@ -626,12 +788,14 @@ class SearchEngine:
 
     async def _goggames(self, req: SearchRequest) -> SearchResponse:
         import re as _re
+
         url = f"https://gog-games.to/?search={quote_plus(req.query)}"
         html, _, _ = await browser_pool.get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         results = []
         for a in soup.select("a.card"):
-            href = a.get("href", "")
+            href_attr = a.get("href", "")
+            href = href_attr if isinstance(href_attr, str) else ""
             if not href.startswith("/game/"):
                 continue
             text = a.get_text(strip=True)
@@ -641,10 +805,10 @@ class SearchEngine:
             # Split "[Game]X days" → title + last-updated stamp
             m = _re.match(r"^(.*?)(\d+\s+(?:hr|day|mo|yr)s?)\s*$", text)
             if m:
-                title   = m.group(1).strip()
+                title = m.group(1).strip()
                 updated = m.group(2).strip()
             else:
-                title   = text.strip()
+                title = text.strip()
                 updated = ""
             full_url = f"https://gog-games.to{href}"
             snippet_parts = []
@@ -652,11 +816,13 @@ class SearchEngine:
                 snippet_parts.append("[MOD]")
             if updated:
                 snippet_parts.append(f"Updated {updated} ago")
-            results.append(SearchResult(
-                title=title,
-                url=full_url,
-                snippet=" · ".join(snippet_parts),
-            ))
+            results.append(
+                SearchResult(
+                    title=title,
+                    url=full_url,
+                    snippet=" · ".join(snippet_parts),
+                )
+            )
             if len(results) >= req.max_results:
                 break
         return SearchResponse(query=req.query, engine_used="goggames", results=results)
@@ -667,14 +833,16 @@ class SearchEngine:
         soup = BeautifulSoup(html, "html.parser")
         results = []
         cards = soup.select("div.yuRUbf") or soup.select("div.g")
-        for card in cards[:limit * 2]:
+        for card in cards[: limit * 2]:
             a = card.select_one("a[href]")
             title_el = card.select_one("h3")
             if not a or not title_el:
                 continue
-            href = a["href"]
+            href_attr = a["href"]
+            href = href_attr if isinstance(href_attr, str) else ""
             if href.startswith("/url?"):
                 from urllib.parse import parse_qs, urlparse
+
                 href = parse_qs(urlparse(href).query).get("q", [href])[0]
             if not href.startswith("http"):
                 continue
@@ -687,11 +855,13 @@ class SearchEngine:
                 if snippet_el:
                     break
                 ancestor = ancestor.parent
-            results.append(SearchResult(
-                title=title_el.get_text(strip=True),
-                url=href,
-                snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
-            ))
+            results.append(
+                SearchResult(
+                    title=title_el.get_text(strip=True),
+                    url=href,
+                    snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
+                )
+            )
             if len(results) >= limit:
                 break
         return results
@@ -704,14 +874,17 @@ class SearchEngine:
             snippet_el = card.select_one("[data-result='snippet']")
             if not title_el:
                 continue
-            href = title_el.get("href", "")
+            href_attr = title_el.get("href", "")
+            href = href_attr if isinstance(href_attr, str) else ""
             if not href.startswith("http"):
                 continue
-            results.append(SearchResult(
-                title=title_el.get_text(strip=True),
-                url=href,
-                snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
-            ))
+            results.append(
+                SearchResult(
+                    title=title_el.get_text(strip=True),
+                    url=href,
+                    snippet=(snippet_el.get_text(strip=True) if snippet_el else ""),
+                )
+            )
             if len(results) >= limit:
                 break
         return results

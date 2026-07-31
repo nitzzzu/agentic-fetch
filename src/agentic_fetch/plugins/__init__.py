@@ -6,14 +6,18 @@ from .base import FetchPlugin
 _registry: list[type[FetchPlugin]] = []
 
 
-def _discover():
+def _discover() -> None:
     pkg_dir = Path(__file__).parent
     for _, name, _ in pkgutil.iter_modules([str(pkg_dir)]):
         if name in ("__init__", "base"):
             continue
         mod = importlib.import_module(f"agentic_fetch.plugins.{name}")
         for attr in vars(mod).values():
-            if isinstance(attr, type) and issubclass(attr, FetchPlugin) and attr is not FetchPlugin:
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, FetchPlugin)
+                and attr is not FetchPlugin
+            ):
                 _registry.append(attr)
 
 

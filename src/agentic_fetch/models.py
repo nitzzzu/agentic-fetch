@@ -10,7 +10,9 @@ def _validate_fetch_url(url: str) -> str:
     url = url.strip()
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"URL must use http:// or https:// (got {parsed.scheme or 'no'} scheme)")
+        raise ValueError(
+            f"URL must use http:// or https:// (got {parsed.scheme or 'no'} scheme)"
+        )
     if not parsed.netloc:
         raise ValueError("URL has no host")
     return url
@@ -26,16 +28,37 @@ def _validate_iso_date(value: str | None) -> str | None:
     return value
 
 
+FetchMethod = Literal["plugin", "httpx", "curl_cffi", "httpx+browser", "zendriver"]
+
+
 class SearchRequest(BaseModel):
     query: str
     max_results: int = Field(default=10, ge=1, le=50)
-    engine: Literal["google", "duckduckgo", "reddit", "github", "hackernews", "goggames", "cache", "auto"] = "auto"
+    engine: Literal[
+        "google",
+        "duckduckgo",
+        "reddit",
+        "github",
+        "hackernews",
+        "goggames",
+        "cache",
+        "auto",
+    ] = "auto"
 
     # Date filters — Google (tbs), GitHub (created: qualifier), HackerNews (numericFilters)
-    date_from: str | None = Field(default=None, description="Filter results after this date (YYYY-MM-DD). Google, GitHub, HackerNews.")
-    date_to: str | None = Field(default=None, description="Filter results before this date (YYYY-MM-DD). Google, GitHub, HackerNews.")
-    date_preset: Literal["past_hour", "past_day", "past_week", "past_month", "past_year"] | None = Field(
-        default=None, description="Quick date preset for Google. Takes precedence over date_from/date_to."
+    date_from: str | None = Field(
+        default=None,
+        description="Filter results after this date (YYYY-MM-DD). Google, GitHub, HackerNews.",
+    )
+    date_to: str | None = Field(
+        default=None,
+        description="Filter results before this date (YYYY-MM-DD). Google, GitHub, HackerNews.",
+    )
+    date_preset: (
+        Literal["past_hour", "past_day", "past_week", "past_month", "past_year"] | None
+    ) = Field(
+        default=None,
+        description="Quick date preset for Google. Takes precedence over date_from/date_to.",
     )
 
     # Sort — Reddit: relevance|hot|top|new|comments; GitHub repos: stars|forks|updated
@@ -46,7 +69,8 @@ class SearchRequest(BaseModel):
 
     # Reddit: time window filter, most useful with sort=top
     time_filter: Literal["hour", "day", "week", "month", "year", "all"] | None = Field(
-        default=None, description="Reddit time window (default: all). Works with any sort."
+        default=None,
+        description="Reddit time window (default: all). Works with any sort.",
     )
 
     # Reddit: subreddit scope — also parsed from 'subreddit:Name' query prefix
@@ -60,15 +84,21 @@ class SearchRequest(BaseModel):
         default=None, description="GitHub search scope (default: repositories)."
     )
     language: str | None = Field(
-        default=None, description="Programming language filter. GitHub search and trending."
+        default=None,
+        description="Programming language filter. GitHub search and trending.",
     )
     period: Literal["daily", "weekly", "monthly"] | None = Field(
-        default=None, description="GitHub trending period (default: daily). Used when query is empty or 'trending'."
+        default=None,
+        description="GitHub trending period (default: daily). Used when query is empty or 'trending'.",
     )
 
     # HackerNews filters
-    min_points: int | None = Field(default=None, description="HackerNews: minimum points threshold.")
-    min_comments: int | None = Field(default=None, description="HackerNews: minimum comments threshold.")
+    min_points: int | None = Field(
+        default=None, description="HackerNews: minimum points threshold."
+    )
+    min_comments: int | None = Field(
+        default=None, description="HackerNews: minimum comments threshold."
+    )
     story_type: Literal["story", "comment"] | None = Field(
         default=None, description="HackerNews item type to search (default: story)."
     )
@@ -114,7 +144,7 @@ class FetchResponse(BaseModel):
     title: str
     markdown: str
     plugin_used: str | None = None
-    method_used: Literal["plugin", "httpx", "curl_cffi", "httpx+browser", "zendriver"]
+    method_used: FetchMethod
     cached: bool = False
     truncated: bool = False
     next_offset: int | None = None
@@ -133,6 +163,7 @@ class BatchFetchRequest(BaseModel):
     summary (title/method/total_lines/toc) — handy for indexing a set of pages
     cheaply without paying for the full markdown payload over HTTP.
     """
+
     urls: list[str] = Field(..., min_length=1, max_length=50)
     max_concurrency: int = Field(default=5, ge=1, le=20)
     max_tokens_per_url: int | None = Field(default=4000, ge=1)
@@ -190,7 +221,7 @@ class FetchLinesRequest(BaseModel):
     end: int = Field(..., ge=1)
 
     @model_validator(mode="after")
-    def _check_range(self):
+    def _check_range(self) -> "FetchLinesRequest":
         if self.end < self.start:
             raise ValueError(f"end ({self.end}) must be >= start ({self.start})")
         return self

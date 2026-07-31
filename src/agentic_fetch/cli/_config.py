@@ -1,4 +1,5 @@
 """Shared helpers for the agentic-search and agentic-fetch CLIs."""
+
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,7 @@ def load_api_url() -> str:
     if CONFIG_FILE.exists():
         try:
             data = json.loads(CONFIG_FILE.read_text())
-            return data.get("api_url", DEFAULT_URL).rstrip("/")
+            return str(data.get("api_url", DEFAULT_URL)).rstrip("/")
         except Exception:
             pass
     return DEFAULT_URL
@@ -23,7 +24,7 @@ def load_api_url() -> str:
 
 def save_api_url(url: str) -> None:
     """Persist the API base URL to ~/.agentic-fetch, preserving other keys."""
-    data: dict = {}
+    data: dict[str, str] = {}
     if CONFIG_FILE.exists():
         try:
             data = json.loads(CONFIG_FILE.read_text())
