@@ -113,6 +113,28 @@ class TestLinkAbsolutization:
         assert "site.test" not in md
         assert "/docs/page" in md
 
+    def test_relative_src_resolves_against_base_url(self):
+        html = '<html><body><p><img src="pics/a.png"></p></body></html>'
+        md = MarkdownExtractor(
+            html, base_url="https://site.test/root/page"
+        ).to_markdown(include_images=True)
+        assert "https://site.test/root/pics/a.png" in md
+
+    def test_relative_src_resolves_on_non_image_tags(self):
+        html = '<html><body><p><iframe src="/embed/1"></iframe></p></body></html>'
+        md = MarkdownExtractor(html, base_url="https://site.test/root/").to_markdown()
+        assert "https://site.test/embed/1" in md
+
+    def test_links_inside_readability_extracted_article_are_absolutized(self):
+        paragraphs = "".join(
+            f'<p>Article paragraph {i} with a <a href="/doc/{i}">reference link</a> '
+            f"and enough words to count as real content.</p>"
+            for i in range(8)
+        )
+        html = f"<html><body><article>{paragraphs}</article></body></html>"
+        md = MarkdownExtractor(html, base_url="https://site.test/base/").to_markdown()
+        assert "https://site.test/doc/3" in md
+
 
 class TestReadabilityFallback:
     def test_script_only_page_falls_back_to_raw_html(self):
@@ -148,6 +170,72 @@ class TestReadabilityFallback:
         md = MarkdownExtractor(html).to_markdown(selector="#keep")
         assert "selected content" in md
         assert "other content" not in md
+
+    def test_selector_matching_nothing_falls_back_to_whole_document(self):
+        html = "<html><body><p>alpha</p><p>beta</p></body></html>"
+        md = MarkdownExtractor(html).to_markdown(selector="#absent")
+        assert "alpha" in md
+        assert "beta" in md
+
+    def test_page_keeping_under_a_tenth_of_its_text_falls_back_to_raw_html(self):
+        # readability drops the #sidebar block as an unlikely candidate, keeping
+        # only ~3% of the page's visible text — too little to trust, so the whole
+        # document is converted instead.
+        article = "".join(
+            f"<p>Core article line {i} with enough words to count as meaningful "
+            f"text.</p>"
+            for i in range(6)
+        )
+        sidebar = "".join(
+            f"<p>Sidebar prose paragraph {i} rambling on and on with plenty of "
+            f"filler words.</p>"
+            for i in range(200)
+        )
+        html = (
+            f"<html><body><article>{article}</article>"
+            f"<div id='sidebar'>{sidebar}</div></body></html>"
+        )
+        md = MarkdownExtractor(html).to_markdown()
+        assert "Core article line 3" in md
+        assert "Sidebar prose paragraph 7" in md
+
+    def test_bulk_inline_script_does_not_trigger_the_ratio_fallback(self):
+        # Script bytes dominate the markup but carry no visible text, so the
+        # extracted article still clears the ratio and boilerplate stays stripped.
+        article = "".join(
+            f"<p>Core article line {i} with enough words to count as meaningful "
+            f"text.</p>"
+            for i in range(6)
+        )
+        html = (
+            "<html><body><nav><a href='/a'>navigation-chrome-link</a></nav>"
+            f"<article>{article}</article>"
+            f"<script>var payload = '{'x' * 60000}';</script></body></html>"
+        )
+        md = MarkdownExtractor(html).to_markdown()
+        assert "Core article line 3" in md
+        assert "navigation-chrome-link" not in md
+        assert "xxxxx" not in md
+
+    def test_unparseable_html_yields_empty_markdown(self):
+        assert MarkdownExtractor("").to_markdown() == ""
+
+
+class TestExtractorReuse:
+    def test_title_is_available_after_conversion(self):
+        ext = MarkdownExtractor(
+            "<html><head><title>Doc</title></head><body><p>body text</p></body></html>"
+        )
+        ext.to_markdown()
+        assert ext.title == "Doc"
+
+    def test_repeated_conversion_returns_the_same_markdown(self):
+        html = (
+            "<html><body><nav>chrome</nav><div id='main'><p>stable body</p></div>"
+            "</body></html>"
+        )
+        ext = MarkdownExtractor(html, base_url="https://site.test/")
+        assert ext.to_markdown(selector="#main") == ext.to_markdown(selector="#main")
 
 
 class TestExtractToc:

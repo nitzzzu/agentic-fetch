@@ -40,6 +40,13 @@ class CacheMeta:
     symbols: list[str] = field(default_factory=list)
 
 
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
 def _extract_h1(content: str) -> str:
     for line in content.splitlines()[:30]:
         if line.startswith("# "):
@@ -356,53 +363,47 @@ class FetchCache:
         }
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
-        """BM25 search over all cached markdown content."""
+        """BM25 search over all cached markdown content.
 
-        def tokenize(text: str) -> list[str]:
-            return re.findall(r"[a-z0-9]+", text.lower())
+        Documents are reduced to term counts while scoring; only the entries
+        that make the result page are re-read, to cut their snippets.
+        """
+        query_terms = _tokenize(query)
+        if not query_terms:
+            return []
 
-        docs: list[dict[str, Any]] = []
+        docs: list[tuple[CacheMeta, Path, int, dict[str, int]]] = []
         for meta_path, meta in self._iter_meta():
             md_path = meta_path.with_suffix("").with_suffix(".md")
             if not md_path.exists():
                 continue
             try:
-                content = md_path.read_text(encoding="utf-8")
+                tokens = _tokenize(md_path.read_text(encoding="utf-8"))
             except OSError:
                 continue
-            docs.append(
-                {
-                    "url": meta.url,
-                    "title": meta.title or meta.url,
-                    "tokens": tokenize(content),
-                    "content": content,
-                }
-            )
+            docs.append((meta, md_path, len(tokens), Counter(tokens)))
 
         if not docs:
             return []
 
-        query_terms = tokenize(query)
-        if not query_terms:
-            return []
-
-        # Document frequency across corpus
+        # Only query terms are ever looked up, so document frequency is counted
+        # for those alone instead of over every term in the corpus.
         doc_freq: Counter[str] = Counter()
-        for doc in docs:
-            for term in set(doc["tokens"]):
-                doc_freq[term] += 1
+        unique_terms = set(query_terms)
+        for _, _, _, terms in docs:
+            for term in unique_terms:
+                if term in terms:
+                    doc_freq[term] += 1
 
         num_docs = len(docs)
-        avg_dl = sum(len(d["tokens"]) for d in docs) / num_docs
+        avg_dl = sum(d[2] for d in docs) / num_docs
         k1, b = 1.5, 0.75
 
-        scored: list[dict[str, Any]] = []
-        for doc in docs:
-            tf_map: Counter[str] = Counter(doc["tokens"])
-            dl = len(doc["tokens"])
+        scored: list[tuple[float, CacheMeta, Path]] = []
+        for meta, md_path, dl, terms in docs:
             score = 0.0
             for term in query_terms:
-                tf = tf_map.get(term, 0)
+                tf = terms.get(term, 0)
                 if not tf:
                     continue
                 df = doc_freq.get(term, 1)
@@ -410,17 +411,25 @@ class FetchCache:
                 tf_norm = tf * (k1 + 1) / (tf + k1 * (1 - b + b * dl / avg_dl))
                 score += idf * tf_norm
             if score > 0:
-                scored.append(
-                    {
-                        "url": doc["url"],
-                        "title": doc["title"],
-                        "score": round(score, 3),
-                        "snippet": self._bm25_snippet(doc["content"], query_terms),
-                    }
-                )
+                scored.append((round(score, 3), meta, md_path))
 
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:limit]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [
+            {
+                "url": meta.url,
+                "title": meta.title or meta.url,
+                "score": score,
+                "snippet": self._snippet_for(md_path, query_terms),
+            }
+            for score, meta, md_path in scored[:limit]
+        ]
+
+    def _snippet_for(self, md_path: Path, query_terms: list[str]) -> str:
+        try:
+            return self._bm25_snippet(md_path.read_text(encoding="utf-8"), query_terms)
+        except OSError as exc:
+            log.debug("snippet read failed for %s: %s", md_path.name, exc)
+            return ""
 
     def _bm25_snippet(
         self, content: str, query_terms: list[str], window: int = 40

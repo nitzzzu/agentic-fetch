@@ -117,6 +117,33 @@ class TestBm25Search:
         assert hits[0]["snippet"].startswith("…alpha")
 
 
+class TestSearchFreshness:
+    def test_rewriting_an_entry_refreshes_its_search_terms(self, cache):
+        cache.put("https://a.test/", "zeppelin zeppelin", "html")
+        cache.put("https://a.test/", "airship only", "html")
+
+        assert cache.search("zeppelin") == []
+        assert [h["url"] for h in cache.search("airship")] == ["https://a.test/"]
+
+    def test_repeated_query_term_scores_like_a_single_occurrence_per_document(
+        self, cache
+    ):
+        filler = " ".join(["filler"] * 20)
+        cache.put("https://a.test/", f"zeppelin {filler}", "html")
+        cache.put("https://b.test/", f"airship {filler}", "html")
+        cache.put("https://c.test/", f"blimp {filler}", "html")
+
+        once = cache.search("zeppelin")
+        twice = cache.search("zeppelin zeppelin")
+
+        assert twice[0]["score"] == pytest.approx(2 * once[0]["score"], abs=0.002)
+
+    def test_synthesis_entries_are_searchable(self, cache):
+        cache.write("https://synth.test/", "# Notes\n\nzeppelin airship")
+
+        assert [h["url"] for h in cache.search("airship")] == ["https://synth.test/"]
+
+
 class TestPrune:
     def test_entries_older_than_ttl_times_factor_are_evicted(self, cache):
         cache.put("https://old.test/", "old content", "html")

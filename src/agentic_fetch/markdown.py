@@ -5,15 +5,20 @@ from urllib.parse import urljoin, urlparse
 import html_to_markdown
 from html_to_markdown import ConversionOptions
 from bs4 import BeautifulSoup, Tag
+from bs4.filter import SoupStrainer
 
 TOKENS_PER_CHAR = 0.25  # 4 chars per token
 
+# Readability is rejected when it keeps less than this fraction of the page text.
+_MIN_EXTRACTED_RATIO = 0.10
 
-def _readability_extract(html: str) -> str | None:
-    """Extract main article content using readability-lxml. Returns clean HTML or None on failure.
 
-    Falls back to None when the original page is JS-heavy and readability ends up
-    with less content than the raw stripped HTML (e.g. news homepages loaded via httpx).
+def _readability_extract(html: str) -> Tag | None:
+    """Extract main article content using readability-lxml.
+
+    Returns the parsed article subtree, or None on failure. Returns None when the
+    original page is JS-heavy and readability ends up with less content than the
+    raw stripped HTML (e.g. news homepages loaded via httpx).
     """
     try:
         from readability import Document
@@ -22,8 +27,9 @@ def _readability_extract(html: str) -> str | None:
         summary = doc.summary()
         # Readability returns a full HTML doc; unwrap to just the body content
         soup = BeautifulSoup(summary, "html.parser")
-        body = soup.find("body") or soup
-        extracted_text = body.get_text(separator="\n", strip=True)
+        body = soup.find("body")
+        root: Tag = body if isinstance(body, Tag) else soup
+        extracted_text = root.get_text(separator="\n", strip=True)
         # Require enough non-empty lines — guards against JS-heavy pages where
         # httpx fetches only script tags and readability extracts almost nothing
         meaningful_lines = [
@@ -31,37 +37,65 @@ def _readability_extract(html: str) -> str | None:
         ]
         if len(meaningful_lines) < 5:
             return None
-        # Also sanity-check against original: if readability extracted less than 10%
-        # of the original text, it likely stripped too much (JS-heavy shell page)
-        original_text = BeautifulSoup(html, "html.parser").get_text(strip=True)
-        if original_text and len(extracted_text) < len(original_text) * 0.10:
-            return None
-        return str(body)
+        # Also sanity-check against original: if readability kept less than
+        # _MIN_EXTRACTED_RATIO of the original text, it likely stripped too much
+        # (JS-heavy shell page). Stripped text is never longer than the markup it
+        # came from, so when the extracted text already clears the ratio against
+        # the raw HTML length the check cannot fire, and the expensive
+        # full-document parse is skipped. That guard is exact, not a heuristic.
+        if len(extracted_text) < len(html) * _MIN_EXTRACTED_RATIO:
+            original_text = BeautifulSoup(html, "html.parser").get_text(strip=True)
+            if (
+                original_text
+                and len(extracted_text) < len(original_text) * _MIN_EXTRACTED_RATIO
+            ):
+                return None
+        return root
     except Exception:
         return None
 
 
-def _absolutize_links(html: str, base_url: str) -> str:
-    """Resolve relative hrefs/srcs against base_url."""
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(True):
-        for attr in ("href", "src"):
+def _absolutize_links(root: Tag, base_url: str) -> None:
+    """Resolve relative hrefs/srcs against base_url, in place."""
+    for attr in ("href", "src"):
+        for tag in root.find_all(attrs={attr: True}):
             val = tag.get(attr)
             if isinstance(val, str) and val and not urlparse(val).scheme:
                 tag[attr] = urljoin(base_url, val)
-    return str(soup)
 
 
 class MarkdownExtractor:
     def __init__(self, html: str, base_url: str = ""):
         self._raw_html = html
-        self.soup = BeautifulSoup(html, "html.parser")
+        self._soup: BeautifulSoup | None = None
         self.base_url = base_url
 
     @property
+    def soup(self) -> BeautifulSoup:
+        """Lazily parsed raw HTML. Only the non-readability paths need the tree."""
+        if self._soup is None:
+            self._soup = BeautifulSoup(self._raw_html, "html.parser")
+        return self._soup
+
+    @property
     def title(self) -> str:
-        t = self.soup.find("title")
+        # Reuse the full tree if one exists; otherwise parse just the <title>
+        # instead of building a tree for the whole document.
+        source = self._soup or BeautifulSoup(
+            self._raw_html, "html.parser", parse_only=SoupStrainer("title")
+        )
+        t = source.find("title")
         return t.get_text(strip=True) if t else ""
+
+    def _cleaned_soup(self, strip_selectors: Sequence[str]) -> BeautifulSoup:
+        """Parse the raw HTML and drop scripts, styles and configured selectors."""
+        soup = self.soup
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        for sel in strip_selectors:
+            for el in soup.select(sel):
+                el.decompose()
+        return soup
 
     def to_markdown(
         self,
@@ -70,28 +104,21 @@ class MarkdownExtractor:
         include_links: bool = True,
         include_images: bool = False,
     ) -> str:
-        for tag in self.soup(["script", "style", "noscript"]):
-            tag.decompose()
-
-        for sel in strip_selectors:
-            for el in self.soup.select(sel):
-                el.decompose()
-
-        root: Tag = self.soup
+        root: Tag
         if selector:
-            sel_el = self.soup.select_one(selector)
-            if sel_el:
-                root = sel_el
+            soup = self._cleaned_soup(strip_selectors)
+            root = soup.select_one(selector) or soup
         else:
             # Use readability to extract main content and strip boilerplate
             # (nav, footer, sidebar, ads) — inspired by python-readability workflow
-            clean_html = _readability_extract(self._raw_html)
-            if clean_html:
-                root = BeautifulSoup(clean_html, "html.parser")
+            article = _readability_extract(self._raw_html)
+            root = (
+                article if article is not None else self._cleaned_soup(strip_selectors)
+            )
 
-        html_str = (
-            _absolutize_links(str(root), self.base_url) if self.base_url else str(root)
-        )
+        if self.base_url:
+            _absolutize_links(root, self.base_url)
+        html_str = str(root)
 
         strip_tags: set[str] = set()
         if not include_links:
